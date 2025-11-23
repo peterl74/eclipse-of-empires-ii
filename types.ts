@@ -178,6 +178,7 @@ export interface GameState {
     isDeclaring: boolean; // New: is the player choosing what to declare?
     pendingHexId: string | null; // New: which hex are they declaring for?
     activeSidebarTab: SidebarTab;
+    isMarketOpen: boolean; // New: is the market modal open?
   };
   
   activeEvent: { card: EventCard; isRelicPowered: boolean } | null;

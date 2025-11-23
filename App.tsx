@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
@@ -5,6 +6,7 @@ import { FACTIONS, TOTAL_ROUNDS, EVENTS_DECK, OBJECTIVES_DECK, TILE_CONFIG, VP_C
 import HexGrid from './components/HexGrid';
 import ActionPanel from './components/ActionPanel';
 import HelpModal from './components/HelpModal';
+import MarketModal from './components/MarketModal';
 import TurnOrderTracker from './components/TurnOrderTracker';
 import SplashScreen from './components/SplashScreen';
 import { Eye, EyeOff, Trophy, Scroll, Target, Zap, X, Users, BookOpen, Info, Sword, Hammer, Coins, Crown, VenetianMask } from 'lucide-react';
@@ -239,7 +241,8 @@ const App: React.FC = () => {
         selectedHexId: null, 
         isDeclaring: false, 
         pendingHexId: null, 
-        activeSidebarTab: 'LOG'
+        activeSidebarTab: 'LOG',
+        isMarketOpen: false
     },
     activeEvent: null,
     eventDeck: [],
@@ -283,7 +286,8 @@ const App: React.FC = () => {
             selectedHexId: null, 
             isDeclaring: false, 
             pendingHexId: null, 
-            activeSidebarTab: 'LOG'
+            activeSidebarTab: 'LOG',
+            isMarketOpen: false
           },
           activeEvent: null,
           eventDeck: initialEventDeck,
@@ -495,7 +499,7 @@ const App: React.FC = () => {
       else if (effect.type === 'DOUBLE_ACTION') {
           if (players[activePid].resources[Resource.Gold] >= 2) {
               players[activePid].resources[Resource.Gold] -= 2;
-              players[activePid].status.extraActions = 2; // Grants 2 actions in immediate succession
+              players[activePid].status.extraActions = 1; // Corrected: Grants 1 extra action (Total 2)
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} pays 2 Gold for Forced March (Double Action).`, type: 'info' });
           } else {
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} could not afford Forced March.`, type: 'info' });
@@ -790,8 +794,11 @@ const App: React.FC = () => {
 
   const advanceTurn = () => {
       setGameState(prev => {
-          // Check if current player has extra actions (Forced March / Double Time)
-          const currentPlayer = prev.players[prev.turnOrderIndex];
+          // Check extra actions (Forced March)
+          // FIX: Correctly look up the ACTIVE player, not just the index position in the players array
+          const activePlayerId = prev.turnOrder[prev.turnOrderIndex];
+          const currentPlayer = prev.players[activePlayerId];
+
           if (currentPlayer && currentPlayer.status.extraActions > 0 && !currentPlayer.hasPassed) {
               // Decrement extra actions and let them play again
               const ps = prev.players.map(p => p.id === currentPlayer.id ? { ...p, status: { ...p.status, extraActions: p.status.extraActions - 1 } } : p);
@@ -818,7 +825,8 @@ const App: React.FC = () => {
           
           // 3. Skip players who have already passed
           let attempts = 0;
-          while (prev.players[nextIndex].hasPassed && attempts < prev.players.length) {
+          // FIX: Use the turnOrder lookup to check if the TARGET player has passed
+          while (prev.players[prev.turnOrder[nextIndex]].hasPassed && attempts < prev.players.length) {
               nextIndex = (nextIndex + 1) % prev.players.length;
               attempts++;
           }
@@ -1059,6 +1067,10 @@ const App: React.FC = () => {
       if (callback) callback();
   };
 
+  const handleCloseMarket = () => {
+      setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isMarketOpen: false } }));
+  }
+
   // --- HUMAN INPUT HANDLERS ---
 
   const handleSelectCitizen = (type: CitizenType) => {
@@ -1084,10 +1096,41 @@ const App: React.FC = () => {
       
       if (action === 'PASS') {
            setGameState(prev => {
-               const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, hasPassed: true } : pl);
-               return { ...prev, players: ps, logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass for this Eclipse.", type:'info', actorId: 0}] };
+               // 1. Mark player as passed
+               const newPlayers = prev.players.map(pl => pl.id === 0 ? { ...pl, hasPassed: true } : pl);
+               
+               // 2. Check logic IMMEDIATELY with new state (Atomic)
+               const allPassed = newPlayers.every(p => p.hasPassed);
+               
+               if (allPassed) {
+                   // End Phase logic inline
+                   return {
+                       ...prev,
+                       players: newPlayers,
+                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass. All players passed. Events Phase beginning.", type:'phase', actorId: 0}],
+                       turnTrigger: prev.turnTrigger + 1,
+                       uiState: { ...prev.uiState, isProcessing: false }
+                   };
+               } else {
+                   // Advance Turn logic inline
+                   let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+                   let attempts = 0;
+                   // Use turnOrder lookup to check next player status correctly
+                   while (newPlayers[prev.turnOrder[nextIndex]].hasPassed && attempts < prev.players.length) {
+                       nextIndex = (nextIndex + 1) % prev.players.length;
+                       attempts++;
+                   }
+                   
+                   return { 
+                       ...prev, 
+                       players: newPlayers, 
+                       turnOrderIndex: nextIndex,
+                       turnTrigger: prev.turnTrigger + 1,
+                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass for this Eclipse.", type:'info', actorId: 0}],
+                       uiState: { ...prev.uiState, isProcessing: false } // Unlock UI
+                   };
+               }
            });
-           advanceTurn();
            return;
       }
       
@@ -1117,40 +1160,38 @@ const App: React.FC = () => {
           return;
       }
 
-      // New Action: EMERGENCY MARKET (IMPROVED)
+      // New Action: OPEN MARKET MODAL
+      if (action === 'OPEN_MARKET') {
+          setGameState(prev => ({
+              ...prev,
+              uiState: { ...prev.uiState, isMarketOpen: true }
+          }));
+          return;
+      }
+
+      // New Action: EXECUTE MARKET TRADE
       if (action === 'TRADE_MARKET') {
-          let costRes: Resource | null = null;
+          const costRes = payload?.resource;
           
-          // INTELLIGENT RESOURCE SELECTION
-          // Prioritize the resource they have the most of
-          const candidates: Resource[] = [];
-          if (p.resources[Resource.Gold] >= 3) candidates.push(Resource.Gold);
-          if (p.resources[Resource.Stone] >= 3) candidates.push(Resource.Stone);
-          if (p.resources[Resource.Relic] >= 3) candidates.push(Resource.Relic);
-
-          if (candidates.length > 0) {
-              // Sort by amount held (descending)
-              candidates.sort((a, b) => p.resources[b] - p.resources[a]);
-              costRes = candidates[0];
-          }
-
-          if (costRes) {
+          if (costRes && p.resources[costRes] >= 3) {
               setGameState(prev => {
                    const currentP = prev.players[0];
                    let newRes = { ...currentP.resources };
-                   newRes[costRes!] -= 3;
+                   newRes[costRes] -= 3;
                    newRes[Resource.Grain] += 1;
                    
                    const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, resources: newRes, actionsTaken: pl.actionsTaken + 1 } : pl);
                    return { 
                        ...prev, 
                        players: ps, 
-                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: `Emergency Market: 3 ${costRes} -> 1 Grain.`, type:'info', actorId: 0}] 
+                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: `Emergency Market: 3 ${costRes} -> 1 Grain.`, type:'info', actorId: 0}],
+                       uiState: { ...prev.uiState, isMarketOpen: false } // Close modal
                    };
               });
               advanceTurn();
           } else {
-              addLog("Need 3 Stone, Gold, or Relics.", 'info');
+              addLog("Trade failed. Insufficient resources.", 'info');
+              handleCloseMarket();
           }
           return;
       }
@@ -1204,7 +1245,9 @@ const App: React.FC = () => {
       if (action === 'BUILD_FORTIFY') {
           // Relic Power Logic: Free only if actionsTaken === 0 (First action of the phase)
           const isRelicFree = p.activeRelicPower === 'FREE_FORTIFY' && p.actionsTaken === 0;
-          if (p.status.freeFortify || isRelicFree) {
+          const isFree = p.status.freeFortify || isRelicFree;
+          
+          if (isFree) {
               valid = true;
           } else {
               valid = p.resources[Resource.Stone] >= 1 && p.resources[Resource.Gold] >= 1;
@@ -1797,6 +1840,12 @@ const App: React.FC = () => {
               </div>
           )}
           <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
+          <MarketModal 
+                isOpen={gameState.uiState.isMarketOpen} 
+                onClose={handleCloseMarket} 
+                onConfirm={(resource) => handleHumanAction('TRADE_MARKET', { resource })}
+                playerResources={humanPlayer ? humanPlayer.resources : { Grain: 0, Stone: 0, Gold: 0, Relic: 0 }}
+          />
           {gameState.uiState.isDeclaring && gameState.uiState.pendingHexId && (
               <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                   <div className="bg-[#1e293b] border border-[#fcd34d] shadow-2xl p-6 rounded-lg max-w-lg w-full transform transition-all animate-pop">
