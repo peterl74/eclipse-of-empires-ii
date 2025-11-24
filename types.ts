@@ -1,4 +1,5 @@
 
+
 export enum Resource {
   Grain = 'Grain',
   Stone = 'Stone',
@@ -123,8 +124,9 @@ export interface Player {
   
   // Cycling Turn State
   hasActed: boolean; // Used to track if they did something specific this specific turn interaction
-  hasPassed: boolean; // NEW: If true, they are out of the round until next Phase
-  actionsTaken: number; // NEW: Track number of actions taken in the current phase (for Fatigue logic)
+  hasPassed: boolean; // If true, they are out of the round until next Phase
+  actionsTaken: number; // Track number of actions taken in the current phase (for Fatigue logic)
+  isEliminated: boolean; // NEW: If true, player is out of the game.
   
   // Lifetime Stats for Objectives
   stats: PlayerStats;

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
@@ -101,6 +100,7 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
           hasActed: false,
           hasPassed: false,
           actionsTaken: 0,
+          isEliminated: false,
           stats: {
               battlesWon: 0,
               tilesRevealed: 0, 
@@ -129,18 +129,20 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
 // --- SCORING & INCOME LOGIC ---
 
 const calculateScore = (player: Player, map: Record<string, HexData>, publicObjectives: SecretObjective[]): { total: number, breakdown: any, objSuccess: boolean } => {
-    const ownedTiles = Object.values(map).filter(h => h.ownerId === player.id);
-    
     // 1. Tile VP
+    // Iterate over map to ensure we only count tiles strictly owned by the player
+    const ownedTiles = (Object.values(map) as HexData[]).filter(h => h.ownerId === player.id);
     let tileVp = 0;
     ownedTiles.forEach(t => {
         tileVp += VP_CONFIG[t.type] || 0;
     });
 
     // 2. Fortification VP
+    // STRICT CHECK: Iterate over ALL map tiles to find active fortifications owned by this player.
+    // This prevents sync issues where a player object might have stale stats.
     let fortVp = 0;
-    Object.values(map).forEach(h => {
-        if (h.fortification?.ownerId === player.id) {
+    (Object.values(map) as HexData[]).forEach(h => {
+        if (h.fortification && h.fortification.ownerId === player.id) {
             fortVp += VP_CONFIG.Fortification;
         }
     });
@@ -210,6 +212,29 @@ const getCoordString = (map: Record<string, HexData>, hexId: string) => {
     if (!h) return "Unknown";
     return `${h.diceCoords.col},${h.diceCoords.row}`;
 };
+
+const checkForElimination = (players: Player[], map: Record<string, HexData>, round: number): { updatedPlayers: Player[], eliminationLogs: LogEntry[] } => {
+    const eliminationLogs: LogEntry[] = [];
+    const updatedPlayers = players.map(p => {
+        if (p.isEliminated) return p; // Already eliminated, skip check.
+        
+        // A player is eliminated if they have 0 tiles AND are not the human player who might have a capital at the start
+        const ownedTileCount = Object.values(map).filter(h => h.ownerId === p.id).length;
+        if (ownedTileCount === 0) {
+            eliminationLogs.push({
+                id: `elim-${p.id}-${Date.now()}`,
+                turn: round,
+                text: `${p.name} has been eliminated from the game!`,
+                type: 'combat',
+                actorId: p.id
+            });
+            return { ...p, isEliminated: true, hasPassed: true }; // Mark as eliminated and passed
+        }
+        return p;
+    });
+    return { updatedPlayers, eliminationLogs };
+};
+
 
 interface ResolvingEvent {
   card: EventCard;
@@ -345,11 +370,11 @@ const App: React.FC = () => {
       
       // Citizen Choice Phase AI
       if (gameState.phase === Phase.CitizenChoice) {
-          const aiPlayers = gameState.players.filter(p => !p.isHuman && p.selectedCitizen === null);
+          const aiPlayers = gameState.players.filter(p => !p.isHuman && !p.isEliminated && p.selectedCitizen === null);
           if (aiPlayers.length > 0) {
               setGameState(prev => {
                   const newPlayers = prev.players.map(p => {
-                      if (p.isHuman || p.selectedCitizen) return p;
+                      if (p.isHuman || p.isEliminated || p.selectedCitizen) return p;
                       let choice = CitizenType.Explorer;
                       if (p.resources[Resource.Grain] < 1) choice = CitizenType.Merchant;
                       else if (Math.random() > 0.6) choice = CitizenType.Builder;
@@ -368,11 +393,11 @@ const App: React.FC = () => {
           
           if (!activePlayer) return;
 
-          // IMPORTANT: Check turnTrigger to ensure we don't process stale states
-          if (!activePlayer.isHuman && !activePlayer.hasPassed) {
+          // IMPORTANT: AI only acts if it's their turn, they haven't passed, and they aren't eliminated.
+          if (!activePlayer.isHuman && !activePlayer.hasPassed && !activePlayer.isEliminated) {
               const timer = setTimeout(() => {
                   executeAiAction(activeId);
-              }, 2500); 
+              }, 1500); 
               return () => clearTimeout(timer);
           }
       }
@@ -499,7 +524,7 @@ const App: React.FC = () => {
       else if (effect.type === 'DOUBLE_ACTION') {
           if (players[activePid].resources[Resource.Gold] >= 2) {
               players[activePid].resources[Resource.Gold] -= 2;
-              players[activePid].status.extraActions = 1; // Corrected: Grants 1 extra action (Total 2)
+              players[activePid].status.extraActions = 1; // Grants 1 extra action (Total 2)
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} pays 2 Gold for Forced March (Double Action).`, type: 'info' });
           } else {
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} could not afford Forced March.`, type: 'info' });
@@ -663,15 +688,17 @@ const App: React.FC = () => {
 
           // 4. Attack (Warrior)
           else if (!actionTaken && role === CitizenType.Warrior && ai.status.canAttack) {
-              // Cost Check: 1 Grain
-              if (ai.resources[Resource.Grain] >= 1) {
+              // Cost Check: Dynamic Fatigue
+              const attackCost = ai.actionsTaken === 0 ? 1 : 2;
+
+              if (ai.resources[Resource.Grain] >= attackCost) {
                   const enemyIds = allNeighbors.filter(id => {
                       const hex = newMap[id];
                       return hex.ownerId !== null && hex.ownerId !== ai.id;
                   });
 
                   if (enemyIds.length > 0) {
-                      ai.resources[Resource.Grain] -= 1; // Pay cost
+                      ai.resources[Resource.Grain] -= attackCost; // Pay cost
 
                       const targetIdHex = enemyIds[Math.floor(Math.random() * enemyIds.length)];
                       const targetHex = newMap[targetIdHex];
@@ -784,62 +811,80 @@ const App: React.FC = () => {
           };
 
           const newLogs = [...prev.logs, newLogEntry];
+          const finalPlayersState = newPlayers;
+
+          // --- ATOMIC TURN ADVANCEMENT (RACE CONDITION FIX) ---
+          const activePlayers = finalPlayersState.filter(p => !p.isEliminated);
+          const allPassed = activePlayers.every(p => p.hasPassed);
+          let nextTurnOrderIndex = prev.turnOrderIndex;
+
+          if (!allPassed) {
+              let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+              let attempts = 0;
+              while ((finalPlayersState[prev.turnOrder[nextIndex]].hasPassed || finalPlayersState[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
+                  nextIndex = (nextIndex + 1) % prev.players.length;
+                  attempts++;
+              }
+              nextTurnOrderIndex = nextIndex;
+          }
           
-          return { ...prev, players: newPlayers, map: newMap, logs: newLogs, eventDeck: currentEventDeck, discardPile: currentDiscardPile };
+          return { 
+            ...prev, 
+            players: finalPlayersState, 
+            map: newMap, 
+            logs: newLogs, 
+            eventDeck: currentEventDeck, 
+            discardPile: currentDiscardPile,
+            turnOrderIndex: nextTurnOrderIndex,
+            turnTrigger: prev.turnTrigger + 1
+          };
       });
-      
-      // Cycle logic handling
-      setTimeout(() => advanceTurn(), 500);
   };
 
   const advanceTurn = () => {
-      setGameState(prev => {
-          // Check extra actions (Forced March)
-          // FIX: Correctly look up the ACTIVE player, not just the index position in the players array
-          const activePlayerId = prev.turnOrder[prev.turnOrderIndex];
-          const currentPlayer = prev.players[activePlayerId];
+    setGameState(prev => {
+        const activePlayerId = prev.turnOrder[prev.turnOrderIndex];
+        const currentPlayer = prev.players[activePlayerId];
 
-          if (currentPlayer && currentPlayer.status.extraActions > 0 && !currentPlayer.hasPassed) {
-              // Decrement extra actions and let them play again
-              const ps = prev.players.map(p => p.id === currentPlayer.id ? { ...p, status: { ...p.status, extraActions: p.status.extraActions - 1 } } : p);
-              // Force Trigger update even if index stays same
-              return { ...prev, players: ps, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
-          }
+        if (currentPlayer && currentPlayer.status.extraActions > 0 && !currentPlayer.hasPassed && !currentPlayer.isEliminated) {
+            const ps = prev.players.map(p => p.id === currentPlayer.id ? { 
+                ...p, 
+                status: { ...p.status, extraActions: p.status.extraActions - 1 } 
+            } : p);
+            return { ...prev, players: ps, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
+        }
 
-          // 1. Check if everyone has passed
-          const allPassed = prev.players.every(p => p.hasPassed); 
-          
-          if (allPassed) {
-               // EVERYONE PASSED: End the Phase
-               // We MUST update turnTrigger here or the effect watching for End Phase won't fire if turnOrderIndex is stale
-               return { 
-                   ...prev, 
-                   logs: [...prev.logs, { id: 'end-phase', turn: prev.round, text: "All players passed. Events Phase beginning.", type: 'phase' }],
-                   turnTrigger: prev.turnTrigger + 1,
-                   uiState: { ...prev.uiState, isProcessing: false }
-               };
-          }
+        const activePlayers = prev.players.filter(p => !p.isEliminated);
+        const allPassed = activePlayers.every(p => p.hasPassed); 
+        
+        if (allPassed) {
+             return { 
+                 ...prev, 
+                 logs: [...prev.logs, { id: 'end-phase', turn: prev.round, text: "All players passed. Events Phase beginning.", type: 'phase' }],
+                 turnTrigger: prev.turnTrigger + 1,
+                 uiState: { ...prev.uiState, isProcessing: false }
+             };
+        }
 
-          // 2. Calculate Next Player Index (Looping)
-          let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
-          
-          // 3. Skip players who have already passed
-          let attempts = 0;
-          // FIX: Use the turnOrder lookup to check if the TARGET player has passed
-          while (prev.players[prev.turnOrder[nextIndex]].hasPassed && attempts < prev.players.length) {
-              nextIndex = (nextIndex + 1) % prev.players.length;
-              attempts++;
-          }
+        let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+        
+        let attempts = 0;
+        
+        while ((prev.players[prev.turnOrder[nextIndex]].hasPassed || prev.players[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
+            nextIndex = (nextIndex + 1) % prev.players.length;
+            attempts++;
+        }
 
-          return { ...prev, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
-      });
+        return { ...prev, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
+    });
   };
 
   // Watch for Phase Change trigger from advanceTurn
   useEffect(() => {
       if (gameState.phase === Phase.Action) {
-           const allPassed = gameState.players.every(p => p.hasPassed);
-           if (allPassed) {
+           const activePlayers = gameState.players.filter(p => !p.isEliminated);
+           const allPassed = activePlayers.every(p => p.hasPassed);
+           if (allPassed && activePlayers.length > 0) { // Ensure game doesn't hang if all are eliminated
                // Need to delay slightly to allow logs to render
                setTimeout(() => handlePhaseTransition(), 500);
            }
@@ -857,16 +902,11 @@ const App: React.FC = () => {
 
   const handlePhaseTransition = () => {
       setGameState(prev => {
-          // If we are currently in the Events phase, calling this will advance to scoring.
-          // This is triggered by advanceFromEventsPhase.
-          if (prev.phase === Phase.Events) {
-              return { ...prev, phase: Phase.Scoring };
-          }
-
+          
           const nextPhaseMap: Record<Phase, Phase> = {
               [Phase.Income]: Phase.CitizenChoice,
               [Phase.CitizenChoice]: Phase.Action,
-              [Phase.Action]: Phase.Events, // This is triggered by cycle end
+              [Phase.Action]: Phase.Events,
               [Phase.Events]: Phase.Scoring,
               [Phase.Scoring]: prev.round === TOTAL_ROUNDS ? Phase.EndGame : Phase.Income,
               [Phase.EndGame]: Phase.EndGame
@@ -874,9 +914,14 @@ const App: React.FC = () => {
           
           const nextP = nextPhaseMap[prev.phase];
           if (prev.phase === Phase.Action && nextP !== Phase.Events) return prev; 
+          
+          // If we are currently in the Events phase, calling this will advance to scoring.
+          if (prev.phase === Phase.Events) {
+              const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
+              return { ...prev, phase: Phase.Scoring, players: playersAfterElimination, logs: [...prev.logs, ...eliminationLogs] };
+          }
 
           let nextRound = prev.round;
-          let logs = [...prev.logs];
           let newActiveEvent = null;
           let partialUpdate = { players: prev.players, map: prev.map };
           let nextTurnOrderIndex = 0;
@@ -885,25 +930,42 @@ const App: React.FC = () => {
           let currentDiscardPile = prev.discardPile;
           let currentObjectiveDeck = prev.objectiveDeck;
           let newPublicObjectives = [...prev.publicObjectives];
+          let logs = [...prev.logs];
           
           if (nextP === Phase.Income) nextRound++;
           
-          // ROTATING INITIATIVE Logic for Action Phase
+          // ELIMINATION & TURN ORDER LOGIC (CRITICAL ORDER OF OPERATIONS)
           if (nextP === Phase.Action) {
-             // Shift turn order so the start player rotates each round
-             const shift = (nextRound - 1) % prev.players.length;
-             const base = prev.players.map(p => p.id).sort((a,b) => a-b);
-             
-             // Create rotated array
-             nextTurnOrder = [...base.slice(shift), ...base.slice(0, shift)];
-             nextTurnOrderIndex = 0; 
-             
-             logs.push({ id: `init-${nextRound}`, turn: nextRound, text: `Turn Order updated. ${prev.players[nextTurnOrder[0]].name} goes first.`, type: 'info' });
+            const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
+            logs.push(...eliminationLogs);
+            partialUpdate.players = playersAfterElimination;
+
+            const activePlayers = playersAfterElimination.filter(p => !p.isEliminated);
+            if (activePlayers.length > 0) {
+                const activePlayerIds = activePlayers.map(p => p.id).sort((a, b) => a - b);
+                const shift = (nextRound - 1) % activePlayers.length;
+                nextTurnOrder = [...activePlayerIds.slice(shift), ...activePlayerIds.slice(0, shift)];
+                nextTurnOrderIndex = 0;
+                
+                const firstPlayerName = playersAfterElimination.find(p => p.id === nextTurnOrder[0])?.name || "Unknown";
+
+                logs.push({ 
+                    id: `init-${nextRound}`, 
+                    turn: nextRound, 
+                    text: `Turn Order updated. ${firstPlayerName} goes first.`, 
+                    type: 'info' 
+                });
+            } else {
+                nextTurnOrder = [];
+                nextTurnOrderIndex = 0;
+            }
           }
 
-          // GLOBAL EVENT PHASE
           if (nextP === Phase.Events) {
-            // Draw Card Logic
+            const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
+            logs.push(...eliminationLogs);
+            partialUpdate.players = playersAfterElimination;
+
             const drawResult = drawCard(currentEventDeck, currentDiscardPile);
             const card = drawResult.card;
             currentEventDeck = drawResult.newDeck;
@@ -913,14 +975,14 @@ const App: React.FC = () => {
                 logs.push({ id: `shuffle-${Date.now()}`, turn: nextRound, text: "Event Deck empty. Discard pile reshuffled.", type: 'info' });
             }
             
-            const result = applyEventToState(prev, card, false, true);
+            const result = applyEventToState({ ...prev, players: playersAfterElimination, logs }, card, false, true);
             
-            partialUpdate.players = result.players || prev.players;
+            partialUpdate.players = result.players || playersAfterElimination;
             partialUpdate.map = result.map || prev.map;
             logs.push(...(result.logs || []));
             newActiveEvent = { card, isRelicPowered: false };
 
-            const humanNeedsChoice = card.id === 'e1'; // Resource Boom
+            const humanNeedsChoice = card.id === 'e1' && !playersAfterElimination[0].isEliminated;
 
             if (humanNeedsChoice) {
                 setResolvingEvent({
@@ -931,7 +993,6 @@ const App: React.FC = () => {
                     onComplete: () => setTimeout(advanceFromEventsPhase, 1000)
                 });
             } else {
-                // No human interaction, proceed after a delay to allow reading the event log
                 setTimeout(advanceFromEventsPhase, 3500);
             }
           }
@@ -942,8 +1003,8 @@ const App: React.FC = () => {
                   ...p,
                   vp: currentScore.total,
                   hasActed: false,
-                  hasPassed: false, // RESET PASS FLAG
-                  actionsTaken: 0,  // RESET FATIGUE
+                  hasPassed: p.isEliminated ? true : false, // Eliminated players are always "passed"
+                  actionsTaken: 0,
                   selectedCitizen: nextP === Phase.CitizenChoice ? null : p.selectedCitizen,
                   status: {
                       ...p.status,
@@ -960,7 +1021,6 @@ const App: React.FC = () => {
           if (nextP === Phase.Income || (prev.phase === Phase.Scoring && nextP !== Phase.EndGame)) {
                logs.push({ id: `round-${nextRound}`, turn: nextRound, text: `Eclipse ${nextRound}`, type: 'phase' });
 
-               // PUBLIC OBJECTIVES LOGIC (Directive System)
                if (nextRound >= 2 && nextRound <= 4) {
                    const obj = currentObjectiveDeck.pop();
                    if (obj) {
@@ -969,15 +1029,14 @@ const App: React.FC = () => {
                    }
                }
 
-               // AUTO INCOME
                newPlayers = newPlayers.map(p => {
-                   // Trade Baron Power Application:
+                   if (p.isEliminated) return p; // No income for the dead
+
                    if (p.activeRelicPower === 'TRADE_BARON') {
                        p.status.freeTrades = 1;
                    }
 
                    const rates = getIncomeRate(p, partialUpdate.map, false);
-                   
                    p.resources[Resource.Grain] += rates[Resource.Grain];
                    p.resources[Resource.Stone] += rates[Resource.Stone];
                    p.resources[Resource.Gold] += rates[Resource.Gold];
@@ -995,7 +1054,7 @@ const App: React.FC = () => {
           if (nextP === Phase.Action) {
               logs.push({ id: 'reveal', turn: prev.round, text: "Council Session - Citizens Revealed", type: 'phase' });
               newPlayers.forEach(p => {
-                 if(!p.isHuman) logs.push({id:`rev-${p.id}`, turn:prev.round, text:`${p.name} is a ${p.selectedCitizen}`, type:'info', actorId: p.id});
+                 if(!p.isHuman && !p.isEliminated) logs.push({id:`rev-${p.id}`, turn:prev.round, text:`${p.name} is a ${p.selectedCitizen}`, type:'info', actorId: p.id});
               });
           }
 
@@ -1008,7 +1067,7 @@ const App: React.FC = () => {
               map: partialUpdate.map,
               turnOrder: nextTurnOrder,
               turnOrderIndex: nextTurnOrderIndex,
-              turnTrigger: prev.turnTrigger + 1, // Ensure consistent updates
+              turnTrigger: prev.turnTrigger + 1,
               activeEvent: newActiveEvent,
               eventDeck: currentEventDeck,
               discardPile: currentDiscardPile, 
@@ -1093,17 +1152,15 @@ const App: React.FC = () => {
 
   const handleHumanAction = (action: string, payload?: any) => {
       const p = gameState.players[0];
+      if (p.isEliminated) return; // Eliminated players cannot act.
       
       if (action === 'PASS') {
            setGameState(prev => {
-               // 1. Mark player as passed
                const newPlayers = prev.players.map(pl => pl.id === 0 ? { ...pl, hasPassed: true } : pl);
-               
-               // 2. Check logic IMMEDIATELY with new state (Atomic)
-               const allPassed = newPlayers.every(p => p.hasPassed);
+               const activePlayers = newPlayers.filter(p => !p.isEliminated);
+               const allPassed = activePlayers.every(p => p.hasPassed);
                
                if (allPassed) {
-                   // End Phase logic inline
                    return {
                        ...prev,
                        players: newPlayers,
@@ -1112,11 +1169,9 @@ const App: React.FC = () => {
                        uiState: { ...prev.uiState, isProcessing: false }
                    };
                } else {
-                   // Advance Turn logic inline
                    let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
                    let attempts = 0;
-                   // Use turnOrder lookup to check next player status correctly
-                   while (newPlayers[prev.turnOrder[nextIndex]].hasPassed && attempts < prev.players.length) {
+                   while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
                        nextIndex = (nextIndex + 1) % prev.players.length;
                        attempts++;
                    }
@@ -1127,7 +1182,7 @@ const App: React.FC = () => {
                        turnOrderIndex: nextIndex,
                        turnTrigger: prev.turnTrigger + 1,
                        logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass for this Eclipse.", type:'info', actorId: 0}],
-                       uiState: { ...prev.uiState, isProcessing: false } // Unlock UI
+                       uiState: { ...prev.uiState, isProcessing: false }
                    };
                }
            });
@@ -1160,7 +1215,6 @@ const App: React.FC = () => {
           return;
       }
 
-      // New Action: OPEN MARKET MODAL
       if (action === 'OPEN_MARKET') {
           setGameState(prev => ({
               ...prev,
@@ -1169,7 +1223,6 @@ const App: React.FC = () => {
           return;
       }
 
-      // New Action: EXECUTE MARKET TRADE
       if (action === 'TRADE_MARKET') {
           const costRes = payload?.resource;
           
@@ -1207,7 +1260,6 @@ const App: React.FC = () => {
                setGameState(prev => {
                     const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, actionsTaken: pl.actionsTaken + 1 } : pl);
                     
-                    // Destroy Ruin
                     const nm = { ...prev.map };
                     if (nm[targetRuin.id]) {
                         nm[targetRuin.id] = { ...nm[targetRuin.id], type: TileType.Plains, publicType: TileType.Plains };
@@ -1255,10 +1307,11 @@ const App: React.FC = () => {
           }
       }
       else if (action === 'WARRIOR_ATTACK') {
-          // COST FIX: 1 GRAIN
+          // COST FIX: Dynamic Fatigue
+          const attackCost = p.actionsTaken === 0 ? 1 : 2;
           if (p.status.canAttack) {
-              valid = p.resources[Resource.Grain] >= 1;
-              if (!valid) addLog("Commander, we need 1 Grain to supply the troops!", 'info');
+              valid = p.resources[Resource.Grain] >= attackCost;
+              if (!valid) addLog(`Commander, we need ${attackCost} Grain to supply the troops!`, 'info');
           }
       }
       else if (action === 'EXPLORE_CLAIM') {
@@ -1411,7 +1464,8 @@ const App: React.FC = () => {
                let ps = prev.players.map(p => p.id === 0 ? {...p, actionsTaken: p.actionsTaken + 1 } : p);
                
                // COST DEDUCTION
-               ps[0].resources[Resource.Grain] -= 1;
+               const attackCost = prev.players[0].actionsTaken === 0 ? 1 : 2;
+               ps[0].resources[Resource.Grain] -= attackCost;
                ps[0] = updateMaxResources(ps[0]);
 
                ps[0] = updatePlayerStat(ps[0], 'attacksMade', 1);
@@ -1485,7 +1539,7 @@ const App: React.FC = () => {
       }
 
       setGameState(prev => {
-          let players = prev.players.map(p => ({ ...p, stats: {...p.stats} }));
+          let players = prev.players.map(p => ({ ...p, stats: {...p.stats}, resources: {...p.resources} }));
           const map = { ...prev.map };
           const logs = [...prev.logs];
 
@@ -1500,7 +1554,6 @@ const App: React.FC = () => {
 
           players[myPlayerIndex] = updatePlayerStat(players[myPlayerIndex], 'tilesRevealed', 1);
           
-          // CRITICAL FIX: Static Fatigue Cost Deduction
           const cost = players[myPlayerIndex].actionsTaken === 0 ? 0 : 2;
           if (cost > 0) {
               players[myPlayerIndex].resources[Resource.Grain] -= cost;
@@ -1508,7 +1561,10 @@ const App: React.FC = () => {
           players[myPlayerIndex].actionsTaken++;
 
           let logMsg = `You claim tile [${getCoordString(map, pendingHexId)}] as ${TILE_CONFIG[declaredType].label}.`;
-          if (trueType === TileType.RelicSite) {
+          
+          // Only grant Relic resource and objective progress if declared truthfully.
+          // Bluffing forgoes the immediate reward for the sake of secrecy.
+          if (isRelicDiscovery) {
               players[myPlayerIndex].resources[Resource.Relic]++;
               players[myPlayerIndex] = updatePlayerStat(players[myPlayerIndex], 'relicSitesRevealed', 1);
           }
@@ -1542,6 +1598,7 @@ const App: React.FC = () => {
   }
 
   const humanPlayer = gameState.players[0];
+  const isHumanEliminated = humanPlayer?.isEliminated;
   const realIncome = humanPlayer ? getIncomeRate(humanPlayer, gameState.map, false) : null;
   const publicIncome = humanPlayer ? getIncomeRate(humanPlayer, gameState.map, true) : null;
 
@@ -1668,16 +1725,18 @@ const App: React.FC = () => {
                                   <div key={rival.id} className="bg-slate-900 border border-slate-700 rounded p-3">
                                       <div className="flex justify-between items-center mb-2">
                                           <span className="font-bold text-sm" style={{ color: rival.faction.color }}>{rival.name}</span>
-                                          <span className="text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded">{rivalScore.total} VP</span>
+                                          <span className={`text-xs px-2 py-1 rounded ${rival.isEliminated ? 'bg-red-900 text-red-300' : 'bg-slate-800 text-slate-400'}`}>{rival.isEliminated ? 'ELIMINATED' : `${rivalScore.total} VP`}</span>
                                       </div>
-                                      <div className="space-y-1">
-                                          <div className="text-[10px] text-slate-500 uppercase">Public Production</div>
-                                          <div className="flex gap-2 text-xs font-mono">
-                                              <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>+{rivalPublicIncome[Resource.Grain]}</div>
-                                              <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>+{rivalPublicIncome[Resource.Stone]}</div>
-                                              <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-amber-400 rounded-full"></div>+{rivalPublicIncome[Resource.Gold]}</div>
-                                          </div>
-                                      </div>
+                                      {!rival.isEliminated && (
+                                        <div className="space-y-1">
+                                            <div className="text-[10px] text-slate-500 uppercase">Public Production</div>
+                                            <div className="flex gap-2 text-xs font-mono">
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>+{rivalPublicIncome[Resource.Grain]}</div>
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>+{rivalPublicIncome[Resource.Stone]}</div>
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 bg-amber-400 rounded-full"></div>+{rivalPublicIncome[Resource.Gold]}</div>
+                                            </div>
+                                        </div>
+                                      )}
                                   </div>
                               );
                           })}
@@ -1692,12 +1751,24 @@ const App: React.FC = () => {
   }
 
   if (gameState.phase === Phase.EndGame) {
-    const rankedPlayers = gameState.players.map(p => ({
+    const rankedPlayers = gameState.players.map(p => {
+        // Calculate Score strictly from current map state
+        const scoreData = calculateScore(p, gameState.map, gameState.publicObjectives);
+        
+        // Calculate Bluff Count: Active tiles owned by player where type != publicType
+        const bluffCount = (Object.values(gameState.map) as HexData[]).filter(h => 
+            h.ownerId === p.id && h.type !== h.publicType
+        ).length;
+
+        return {
           ...p,
-          scoreData: calculateScore(p, gameState.map, gameState.publicObjectives)
-      })).sort((a,b) => b.scoreData.total - a.scoreData.total);
+          scoreData,
+          bluffCount
+        };
+    }).sort((a,b) => b.scoreData.total - a.scoreData.total);
+    
     const winner = rankedPlayers[0];
-    const isWinner = winner.id === 0;
+    const isWinner = winner?.id === 0;
 
     return (
         <div className="h-screen w-full bg-[#0b0a14] text-[#e2d9c5] font-sans flex overflow-hidden relative">
@@ -1712,11 +1783,16 @@ const App: React.FC = () => {
                             <div key={p.id} className={`p-4 rounded border ${p.id === 0 ? 'bg-slate-800 border-[#fcd34d]' : 'bg-slate-900 border-slate-700'}`}>
                                  <div className="flex items-center gap-3">
                                      <span className="text-xl font-bold w-6 text-slate-500">#{idx + 1}</span>
-                                     <div className="flex-1 font-bold" style={{ color: p.faction.color }}>{p.name}</div>
+                                     <div className="flex-1">
+                                        <div className="font-bold text-lg" style={{ color: p.faction.color }}>{p.name}</div>
+                                        <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-wider">
+                                            <span className="text-purple-400">Bluffs: {p.bluffCount}</span>
+                                        </div>
+                                     </div>
                                      <div className="text-3xl font-bold text-white">{p.scoreData.total} VP</div>
                                  </div>
                                  {/* Breakdown */}
-                                 <div className="mt-2 text-[10px] text-slate-400 flex justify-between px-2">
+                                 <div className="mt-2 text-[10px] text-slate-400 flex justify-between px-2 pt-2 border-t border-slate-700/50">
                                     <span>Tiles: {p.scoreData.breakdown.tileVp}</span>
                                     <span>Forts: {p.scoreData.breakdown.fortVp}</span>
                                     <span>Relics: {p.scoreData.breakdown.relicVp}</span>
@@ -1744,7 +1820,7 @@ const App: React.FC = () => {
       );
   }
 
-  const isMyTurn = gameState.phase === Phase.Action && gameState.turnOrder[gameState.turnOrderIndex] === 0;
+  const isMyTurn = gameState.phase === Phase.Action && gameState.turnOrder[gameState.turnOrderIndex] === 0 && !isHumanEliminated;
   const isActionPhaseDone = gameState.phase === Phase.Events;
   const activeId = gameState.turnOrder[gameState.turnOrderIndex];
   const activePlayerName = gameState.players[activeId]?.name;
@@ -1899,7 +1975,18 @@ const App: React.FC = () => {
           )}
       </main>
       <div className="shrink-0">
-          <ActionPanel phase={gameState.phase} player={gameState.players[0]} isMyTurn={isMyTurn} activePlayerName={activePlayerName} onSelectCitizen={handleSelectCitizen} onAction={handleHumanAction} onEndPhase={handlePhaseTransition} map={gameState.map} isActionPhaseDone={isActionPhaseDone} />
+          <ActionPanel 
+            phase={gameState.phase} 
+            player={gameState.players[0]} 
+            isMyTurn={isMyTurn} 
+            activePlayerName={activePlayerName} 
+            onSelectCitizen={handleSelectCitizen} 
+            onAction={handleHumanAction} 
+            onEndPhase={handlePhaseTransition} 
+            map={gameState.map} 
+            isActionPhaseDone={isActionPhaseDone}
+            isEliminated={isHumanEliminated}
+          />
       </div>
     </div>
   );
