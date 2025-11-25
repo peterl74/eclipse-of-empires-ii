@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
@@ -8,6 +9,7 @@ import HelpModal from './components/HelpModal';
 import MarketModal from './components/MarketModal';
 import TurnOrderTracker from './components/TurnOrderTracker';
 import SplashScreen from './components/SplashScreen';
+import ResourceIcon from './components/ResourceIcon';
 import { Eye, EyeOff, Trophy, Scroll, Target, Zap, X, Users, BookOpen, Info, Sword, Hammer, Coins, Crown, VenetianMask } from 'lucide-react';
 
 // --- HELPER: Deck Management ---
@@ -50,17 +52,16 @@ const drawCard = (deck: EventCard[], discard: EventCard[]) => {
 
 // --- HELPER: Initial Setup ---
 
-const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: SecretObjective[]): Player[] => {
+const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: SecretObjective[], playerCount: number): Player[] => {
   const players: Player[] = [];
   
-  // Find corner/edge positions for 4 players
   const allIds = Object.keys(map);
   const edgeIds = allIds.filter(id => {
      const neighbors = getNeighbors(map[id].q, map[id].r).filter(n => map[getHexId(n.q, n.r)]);
      return neighbors.length < 6;
-  }).sort(() => Math.random() - 0.5).slice(0, 4);
+  }).sort(() => Math.random() - 0.5).slice(0, playerCount);
 
-  FACTIONS.forEach((faction, idx) => {
+  FACTIONS.slice(0, playerCount).forEach((faction, idx) => {
       const startHexId = edgeIds[idx];
       let startResources = { [Resource.Grain]: 2, [Resource.Stone]: 1, [Resource.Gold]: 1, [Resource.Relic]: 0 };
 
@@ -68,14 +69,12 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
       if (map[startHexId]) {
           const originalType = map[startHexId].type;
           
-          // Resource Bonus based on Start Terrain
           if (originalType === TileType.Plains) startResources[Resource.Grain] += 2;
           else if (originalType === TileType.Mountains) startResources[Resource.Stone] += 2;
           else if (originalType === TileType.Goldmine) startResources[Resource.Gold] += 2;
           else if (originalType === TileType.RelicSite) { startResources[Resource.Gold]++; startResources[Resource.Stone]++; }
-          else { startResources[Resource.Grain]++; startResources[Resource.Stone]++; } // Ruins or default
+          else { startResources[Resource.Grain]++; startResources[Resource.Stone]++; }
 
-          // Convert to Capital
           map[startHexId].type = TileType.Capital; 
           map[startHexId].publicType = TileType.Capital; 
           map[startHexId].ownerId = idx; 
@@ -83,7 +82,6 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
           map[startHexId].fortification = { ownerId: idx, level: 1 }; 
       }
 
-      // Deal 1 Secret Objective (Grand Ambition)
       const secretObj = objectiveDeck.pop() || OBJECTIVES_DECK[0];
 
       players.push({
@@ -129,17 +127,12 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
 // --- SCORING & INCOME LOGIC ---
 
 const calculateScore = (player: Player, map: Record<string, HexData>, publicObjectives: SecretObjective[]): { total: number, breakdown: any, objSuccess: boolean } => {
-    // 1. Tile VP
-    // Iterate over map to ensure we only count tiles strictly owned by the player
     const ownedTiles = (Object.values(map) as HexData[]).filter(h => h.ownerId === player.id);
     let tileVp = 0;
     ownedTiles.forEach(t => {
         tileVp += VP_CONFIG[t.type] || 0;
     });
 
-    // 2. Fortification VP
-    // STRICT CHECK: Iterate over ALL map tiles to find active fortifications owned by this player.
-    // This prevents sync issues where a player object might have stale stats.
     let fortVp = 0;
     (Object.values(map) as HexData[]).forEach(h => {
         if (h.fortification && h.fortification.ownerId === player.id) {
@@ -147,10 +140,8 @@ const calculateScore = (player: Player, map: Record<string, HexData>, publicObje
         }
     });
 
-    // 3. Relic VP
     const relicVp = player.resources[Resource.Relic] * VP_CONFIG.RelicToken;
 
-    // 4. Secret Objective VP
     let objVp = 0;
     let objSuccess = false;
     player.secretObjectives.forEach(obj => {
@@ -160,7 +151,6 @@ const calculateScore = (player: Player, map: Record<string, HexData>, publicObje
         }
     });
 
-    // 5. Public Objective VP
     let publicObjVp = 0;
     publicObjectives.forEach(obj => {
         if (obj.condition(player, map)) {
@@ -184,7 +174,6 @@ const getIncomeRate = (player: Player, map: Record<string, HexData>, usePublicTy
         if (hex.ownerId === player.id) {
             const typeToCheck = usePublicTypes ? hex.publicType : hex.type;
             
-            // Auto-Income for Capital (Replaces Manual Choice)
             if (typeToCheck === TileType.Capital) {
                 rates[Resource.Grain]++;
                 rates[Resource.Stone]++;
@@ -198,7 +187,6 @@ const getIncomeRate = (player: Player, map: Record<string, HexData>, usePublicTy
         }
     });
     
-    // Add Relic Power: PASSIVE_INCOME
     if (player.activeRelicPower === 'PASSIVE_INCOME' || player.status.passiveIncome) {
         rates[Resource.Grain]++;
         rates[Resource.Gold]++;
@@ -216,9 +204,8 @@ const getCoordString = (map: Record<string, HexData>, hexId: string) => {
 const checkForElimination = (players: Player[], map: Record<string, HexData>, round: number): { updatedPlayers: Player[], eliminationLogs: LogEntry[] } => {
     const eliminationLogs: LogEntry[] = [];
     const updatedPlayers = players.map(p => {
-        if (p.isEliminated) return p; // Already eliminated, skip check.
+        if (p.isEliminated) return p;
         
-        // A player is eliminated if they have 0 tiles AND are not the human player who might have a capital at the start
         const ownedTileCount = Object.values(map).filter(h => h.ownerId === p.id).length;
         if (ownedTileCount === 0) {
             eliminationLogs.push({
@@ -228,7 +215,7 @@ const checkForElimination = (players: Player[], map: Record<string, HexData>, ro
                 type: 'combat',
                 actorId: p.id
             });
-            return { ...p, isEliminated: true, hasPassed: true }; // Mark as eliminated and passed
+            return { ...p, isEliminated: true, hasPassed: true };
         }
         return p;
     });
@@ -239,7 +226,7 @@ const checkForElimination = (players: Player[], map: Record<string, HexData>, ro
 interface ResolvingEvent {
   card: EventCard;
   type: 'CHOICE' | 'INFO';
-  amount?: number; // For choice
+  amount?: number;
   isRelicPowered: boolean;
   onComplete?: () => void;
 }
@@ -254,7 +241,7 @@ const App: React.FC = () => {
     phase: Phase.Income,
     round: 1,
     turnOrderIndex: 0,
-    turnOrder: [0, 1, 2, 3],
+    turnOrder: [],
     turnTrigger: 0,
     players: [],
     map: {},
@@ -280,26 +267,25 @@ const App: React.FC = () => {
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // Only scroll when logs length changes
   useEffect(() => {
       if (gameState.uiState.activeSidebarTab === 'LOG') {
           logEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }
   }, [gameState.logs.length]);
 
-  // --- INITIALIZATION ---
-  const startGame = () => {
-      const playerCount = 4; 
-      const newMap = generateMap(playerCount); // Use dynamic map scaling
+  const startGame = (selectedCount: number) => {
+      const playerCount = selectedCount;
+      const newMap = generateMap(playerCount);
       const initialEventDeck = shuffle([...EVENTS_DECK]);
       const initialObjectiveDeck = shuffle([...OBJECTIVES_DECK]);
-      const initialPlayers = createInitialPlayers(newMap, initialObjectiveDeck);
+      const initialPlayers = createInitialPlayers(newMap, initialObjectiveDeck, playerCount);
+      const initialTurnOrder = Array.from({ length: playerCount }, (_, i) => i);
       
       setGameState({
           phase: Phase.Income,
           round: 1,
           turnOrderIndex: 0,
-          turnOrder: [0, 1, 2, 3],
+          turnOrder: initialTurnOrder,
           turnTrigger: 0,
           players: initialPlayers,
           map: newMap,
@@ -324,7 +310,6 @@ const App: React.FC = () => {
   };
 
   const handleSplashStart = () => {
-      startGame();
       setShowSplash(false);
   };
 
@@ -343,7 +328,6 @@ const App: React.FC = () => {
       }));
   };
 
-  // --- STAT UPDATER ---
   const updatePlayerStat = (player: Player, statKey: keyof Player['stats'], value: any): Player => {
       const newStats = { ...player.stats };
       if (typeof value === 'number' && typeof newStats[statKey] === 'number') {
@@ -364,11 +348,9 @@ const App: React.FC = () => {
       return player;
   };
 
-  // --- AI LOGIC LOOP ---
   useEffect(() => {
       if (!gameStarted) return;
       
-      // Citizen Choice Phase AI
       if (gameState.phase === Phase.CitizenChoice) {
           const aiPlayers = gameState.players.filter(p => !p.isHuman && !p.isEliminated && p.selectedCitizen === null);
           if (aiPlayers.length > 0) {
@@ -386,14 +368,12 @@ const App: React.FC = () => {
           }
       }
 
-      // Action Phase AI
       if (gameState.phase === Phase.Action) {
           const activeId = gameState.turnOrder[gameState.turnOrderIndex];
           const activePlayer = gameState.players[activeId];
           
           if (!activePlayer) return;
 
-          // IMPORTANT: AI only acts if it's their turn, they haven't passed, and they aren't eliminated.
           if (!activePlayer.isHuman && !activePlayer.hasPassed && !activePlayer.isEliminated) {
               const timer = setTimeout(() => {
                   executeAiAction(activeId);
@@ -401,9 +381,8 @@ const App: React.FC = () => {
               return () => clearTimeout(timer);
           }
       }
-  }, [gameState.phase, gameState.turnTrigger, gameStarted]); // Changed dependency to turnTrigger
+  }, [gameState.phase, gameState.turnTrigger, gameStarted]);
 
-  // --- EVENT RESOLUTION HELPERS ---
   const applyEventToState = (currentState: GameState, card: EventCard, isRelicPowered: boolean, isGlobal: boolean = true): Partial<GameState> => {
       const players = currentState.players.map(p => ({ ...p, resources: { ...p.resources }, status: { ...p.status }, stats: {...p.stats} }));
       const map = { ...currentState.map };
@@ -414,22 +393,20 @@ const App: React.FC = () => {
       const text = isRelicPowered ? card.relicText : card.normalText;
       const activePid = currentState.turnOrder[currentState.turnOrderIndex] || 0;
 
-      // Special Handling for Relic Power Granting (Permanent Powers)
       if (isRelicPowered && !isGlobal) {
-          // Map Card to Power
-          let power: RelicPowerType = 'PASSIVE_INCOME'; // Default fallback
+          let power: RelicPowerType = 'PASSIVE_INCOME';
           let powerName = "Crown of Prosperity";
 
-          if (card.id === 'e3' || card.id === 'e1') { // Supply Drop, Resource Boom
+          if (card.id === 'e3' || card.id === 'e1') {
               power = 'PASSIVE_INCOME';
               powerName = "Crown of Prosperity (Passive Income)";
-          } else if (card.id === 'e4' || card.id === 'e99') { // Earthquake, Fog
+          } else if (card.id === 'e4' || card.id === 'e99') {
               power = 'FREE_FORTIFY';
               powerName = "Mason's Hammer (Free Fortify)";
-          } else if (card.id === 'e5' || card.id === 'e98') { // Sudden Reinforcements
+          } else if (card.id === 'e5' || card.id === 'e98') {
                power = 'WARLORD';
                powerName = "Warlord's Banner (+1 Combat)";
-          } else if (card.id === 'e8' || card.id === 'e9') { // Merchant Windfall, Forced March
+          } else if (card.id === 'e8' || card.id === 'e9') {
                if (card.id === 'e9') {
                   power = 'DOUBLE_TIME';
                   powerName = "Legion's Stride (Double Action)";
@@ -439,10 +416,8 @@ const App: React.FC = () => {
                }
           }
 
-          // Apply Power (Overwrite old one)
           players[activePid].activeRelicPower = power;
           
-          // Log specific message
           logs.push({ 
               id: `relic-power-${Date.now()}`, 
               turn: currentState.round, 
@@ -452,12 +427,8 @@ const App: React.FC = () => {
           });
 
           players[activePid] = updatePlayerStat(players[activePid], 'relicEventsTriggered', 1);
-
-          // Return EARLY - Do NOT execute the one-time effect
           return { players, map, logs };
       }
-
-      // --- STANDARD EVENT LOGIC (Global or Non-Powered) ---
 
       const prefix = isGlobal ? "GLOBAL EVENT" : `RELIC EVENT (${players[activePid].name})`;
       logs.push({ 
@@ -472,30 +443,27 @@ const App: React.FC = () => {
           players[activePid] = updatePlayerStat(players[activePid], 'relicEventsTriggered', 1);
       }
 
-      // --- SPECIFIC LOGIC ---
       const targets = effect.target === 'SELF' ? [players[activePid]] 
                     : effect.target === 'ENEMY' ? players.filter(p => p.id !== activePid)
                     : effect.target === 'ALL' ? players
-                    : players; // Default
+                    : players;
 
       if (effect.type === 'RESOURCE_GAIN') {
-        if (card.id === 'e1') { // Special handling for Resource Boom
+        if (card.id === 'e1') {
             targets.forEach(p => {
                 if (p.isHuman) {
-                    // This is handled by the resolution modal, do nothing here.
                 } else {
-                    // AI gets a random split of resources.
                     p.resources[Resource.Grain] += Math.floor(effect.value / 2);
                     p.resources[Resource.Gold] += Math.ceil(effect.value / 2);
                     Object.assign(p, updateMaxResources(p));
                 }
             });
-        } else { // Handle all other resource gain events
+        } else {
             targets.forEach(p => {
                 if (effect.target === Resource.Grain) {
                     p.resources[Resource.Grain] += effect.value;
                     if (card.id === 'e3') p.resources[Resource.Stone] += effect.value;
-                } else { // Default for 'ALL' and 'SELF'
+                } else {
                     p.resources[Resource.Grain] += Math.floor(effect.value / 2);
                     p.resources[Resource.Gold] += Math.ceil(effect.value / 2);
                 }
@@ -504,7 +472,6 @@ const App: React.FC = () => {
         }
     }
       else if (effect.type === 'RESOURCE_LOSS') {
-           // Sabotage
            if (effect.target === 'ENEMY') {
                const victim = targets[Math.floor(Math.random() * targets.length)];
                if (victim) {
@@ -524,7 +491,7 @@ const App: React.FC = () => {
       else if (effect.type === 'DOUBLE_ACTION') {
           if (players[activePid].resources[Resource.Gold] >= 2) {
               players[activePid].resources[Resource.Gold] -= 2;
-              players[activePid].status.extraActions = 1; // Grants 1 extra action (Total 2)
+              players[activePid].status.extraActions = 1;
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} pays 2 Gold for Forced March (Double Action).`, type: 'info' });
           } else {
               logs.push({ id: `buff-${Date.now()}`, turn: currentState.round, text: `${players[activePid].name} could not afford Forced March.`, type: 'info' });
@@ -572,8 +539,6 @@ const App: React.FC = () => {
       return { players, map, logs };
   };
 
-  // --- AI ACTIONS ---
-
   const executeAiAction = (playerId: number) => {
       setGameState(prev => {
           let newPlayers = prev.players.map(p => ({...p, resources: {...p.resources}, stats: {...p.stats}}));
@@ -602,8 +567,6 @@ const App: React.FC = () => {
              return realType;
           };
 
-          // 0. EMERGENCY MARKET (If broke and wants to fight/build)
-          // Condition: Low Grain (<1), Has Excess Wealth (Stone/Gold >= 3)
           if (!actionTaken && ai.resources[Resource.Grain] < 1) {
               if (ai.resources[Resource.Gold] >= 3) {
                   ai.resources[Resource.Gold] -= 3;
@@ -618,7 +581,6 @@ const App: React.FC = () => {
               }
           }
 
-          // 1. Unveil Relic (Priority)
           const hiddenRelics = myTiles.filter(t => t.type === TileType.RelicSite && t.publicType !== TileType.RelicSite);
           if (!actionTaken && hiddenRelics.length > 0 && Math.random() > 0.7) {
               const relicTile = hiddenRelics[0];
@@ -633,7 +595,6 @@ const App: React.FC = () => {
               logText = `${ai.name} unveils a Hidden Relic at [${getCoordString(newMap, relicTile.id)}]!`;
               logType = 'event';
 
-              // Apply Power Logic Manually for AI
               let powerName = "";
               if (evt.id === 'e3' || evt.id === 'e1') {
                    ai.activeRelicPower = 'PASSIVE_INCOME'; powerName = "Crown of Prosperity";
@@ -649,9 +610,7 @@ const App: React.FC = () => {
               actionTaken = true;
           }
 
-          // 2. Trade if poor (Merchant or Desperate)
           else if (!actionTaken && (role === CitizenType.Merchant || ai.resources[Resource.Grain] > 4)) {
-              // Trade Baron Check
               const freeTradeAvailable = ai.status.freeTrades > 0; 
               
               if (freeTradeAvailable) {
@@ -667,11 +626,8 @@ const App: React.FC = () => {
               }
           } 
 
-          // 3. Fortify (Builder Priority)
           else if (!actionTaken && role === CitizenType.Builder) {
               const myUnfortified = myTiles.filter(t => !t.fortification);
-              // Builder Fatigue + Power Logic
-              // Free if activeRelicPower === FREE_FORTIFY AND actionsTaken === 0
               const isFree = (ai.activeRelicPower === 'FREE_FORTIFY' && ai.actionsTaken === 0) || ai.status.freeFortify;
               const costStone = isFree ? 0 : 1;
               const costGold = isFree ? 0 : 1;
@@ -686,9 +642,7 @@ const App: React.FC = () => {
               }
           }
 
-          // 4. Attack (Warrior)
           else if (!actionTaken && role === CitizenType.Warrior && ai.status.canAttack) {
-              // Cost Check: Dynamic Fatigue
               const attackCost = ai.actionsTaken === 0 ? 1 : 2;
 
               if (ai.resources[Resource.Grain] >= attackCost) {
@@ -698,7 +652,7 @@ const App: React.FC = () => {
                   });
 
                   if (enemyIds.length > 0) {
-                      ai.resources[Resource.Grain] -= attackCost; // Pay cost
+                      ai.resources[Resource.Grain] -= attackCost;
 
                       const targetIdHex = enemyIds[Math.floor(Math.random() * enemyIds.length)];
                       const targetHex = newMap[targetIdHex];
@@ -709,7 +663,6 @@ const App: React.FC = () => {
                       if (!ai.stats.uniquePlayersAttacked.includes(defender.id)) ai.stats.uniquePlayersAttacked.push(defender.id);
 
                       const attSupport = getNeighbors(targetHex.q, targetHex.r).filter(n => newMap[getHexId(n.q, n.r)]?.ownerId === ai.id).length;
-                      // Warlord Bonus Check
                       const warlordBonus = ai.activeRelicPower === 'WARLORD' ? 1 : 0;
                       const attStr = 1 + 1 + attSupport + ai.status.combatBonus + warlordBonus;
 
@@ -740,9 +693,7 @@ const App: React.FC = () => {
               }
           }
 
-          // 5. Expand (Explorer) with Fatigue
           else if (!actionTaken && role === CitizenType.Explorer) {
-               // Cost Calculation: Free then 2
                const costGrain = ai.actionsTaken === 0 ? 0 : 2;
                
                if (ai.resources[Resource.Grain] >= costGrain) {
@@ -789,7 +740,6 @@ const App: React.FC = () => {
                }
           }
 
-          // PASS LOGIC
           if (!actionTaken) {
               logText = `${ai.name} passes.`;
               ai.hasPassed = true;
@@ -813,7 +763,6 @@ const App: React.FC = () => {
           const newLogs = [...prev.logs, newLogEntry];
           const finalPlayersState = newPlayers;
 
-          // --- ATOMIC TURN ADVANCEMENT (RACE CONDITION FIX) ---
           const activePlayers = finalPlayersState.filter(p => !p.isEliminated);
           const allPassed = activePlayers.every(p => p.hasPassed);
           let nextTurnOrderIndex = prev.turnOrderIndex;
@@ -866,7 +815,6 @@ const App: React.FC = () => {
              };
         }
 
-        // FIXED: Use prev.turnOrder.length instead of prev.players.length to handle elimination resizing
         let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
         
         let attempts = 0;
@@ -880,23 +828,17 @@ const App: React.FC = () => {
     });
   };
 
-  // Watch for Phase Change trigger from advanceTurn
   useEffect(() => {
       if (gameState.phase === Phase.Action) {
            const activePlayers = gameState.players.filter(p => !p.isEliminated);
-           const allPassed = activePlayers.every(p => p.hasPassed);
-           if (allPassed && activePlayers.length > 0) { // Ensure game doesn't hang if all are eliminated
-               // Need to delay slightly to allow logs to render
+           if (activePlayers.length > 0 && activePlayers.every(p => p.hasPassed)) {
                setTimeout(() => handlePhaseTransition(), 500);
            }
       }
-  }, [gameState.turnTrigger, gameState.phase]); // Dependency is now turnTrigger to catch all turn updates
+  }, [gameState.turnTrigger, gameState.phase]);
 
 
-  // --- PHASE MANAGEMENT ---
   const advanceFromEventsPhase = () => {
-    // This is called after an event is resolved (either by modal or timeout)
-    // It triggers the transition from Events -> Scoring
     handlePhaseTransition();
   };
 
@@ -916,7 +858,6 @@ const App: React.FC = () => {
           const nextP = nextPhaseMap[prev.phase];
           if (prev.phase === Phase.Action && nextP !== Phase.Events) return prev; 
           
-          // If we are currently in the Events phase, calling this will advance to scoring.
           if (prev.phase === Phase.Events) {
               const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
               return { ...prev, phase: Phase.Scoring, players: playersAfterElimination, logs: [...prev.logs, ...eliminationLogs] };
@@ -935,7 +876,6 @@ const App: React.FC = () => {
           
           if (nextP === Phase.Income) nextRound++;
           
-          // ELIMINATION & TURN ORDER LOGIC (CRITICAL ORDER OF OPERATIONS)
           if (nextP === Phase.Action) {
             const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
             logs.push(...eliminationLogs);
@@ -1004,7 +944,7 @@ const App: React.FC = () => {
                   ...p,
                   vp: currentScore.total,
                   hasActed: false,
-                  hasPassed: p.isEliminated ? true : false, // Eliminated players are always "passed"
+                  hasPassed: p.isEliminated ? true : false,
                   actionsTaken: 0,
                   selectedCitizen: nextP === Phase.CitizenChoice ? null : p.selectedCitizen,
                   status: {
@@ -1031,7 +971,7 @@ const App: React.FC = () => {
                }
 
                newPlayers = newPlayers.map(p => {
-                   if (p.isEliminated) return p; // No income for the dead
+                   if (p.isEliminated) return p;
 
                    if (p.activeRelicPower === 'TRADE_BARON') {
                        p.status.freeTrades = 1;
@@ -1115,7 +1055,7 @@ const App: React.FC = () => {
       setGameState(prev => {
            let partial: Partial<GameState> = {};
            if (resolvingEvent.isRelicPowered && resolvingEvent.type === 'INFO') {
-              partial = applyEventToState(prev, resolvingEvent.card, true, false); // False = Not Global, it's Personal
+              partial = applyEventToState(prev, resolvingEvent.card, true, false);
            }
            
            const logs = [...(partial.logs || [])];
@@ -1130,8 +1070,6 @@ const App: React.FC = () => {
   const handleCloseMarket = () => {
       setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isMarketOpen: false } }));
   }
-
-  // --- HUMAN INPUT HANDLERS ---
 
   const handleSelectCitizen = (type: CitizenType) => {
       setGameState(prev => {
@@ -1153,7 +1091,7 @@ const App: React.FC = () => {
 
   const handleHumanAction = (action: string, payload?: any) => {
       const p = gameState.players[0];
-      if (p.isEliminated) return; // Eliminated players cannot act.
+      if (p.isEliminated) return;
       
       if (action === 'PASS') {
            setGameState(prev => {
@@ -1170,7 +1108,6 @@ const App: React.FC = () => {
                        uiState: { ...prev.uiState, isProcessing: false }
                    };
                } else {
-                   // Corrected logic using turnOrder.length to prevent crash on elimination
                    let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
                    let attempts = 0;
                    while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
@@ -1240,7 +1177,7 @@ const App: React.FC = () => {
                        ...prev, 
                        players: ps, 
                        logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: `Emergency Market: 3 ${costRes} -> 1 Grain.`, type:'info', actorId: 0}],
-                       uiState: { ...prev.uiState, isMarketOpen: false } // Close modal
+                       uiState: { ...prev.uiState, isMarketOpen: false }
                    };
               });
               advanceTurn();
@@ -1293,11 +1230,9 @@ const App: React.FC = () => {
           return;
       }
 
-      // Action Costs and Validity
       let valid = false;
       
       if (action === 'BUILD_FORTIFY') {
-          // Relic Power Logic: Free only if actionsTaken === 0 (First action of the phase)
           const isRelicFree = p.activeRelicPower === 'FREE_FORTIFY' && p.actionsTaken === 0;
           const isFree = p.status.freeFortify || isRelicFree;
           
@@ -1309,7 +1244,6 @@ const App: React.FC = () => {
           }
       }
       else if (action === 'WARRIOR_ATTACK') {
-          // COST FIX: Dynamic Fatigue
           const attackCost = p.actionsTaken === 0 ? 1 : 2;
           if (p.status.canAttack) {
               valid = p.resources[Resource.Grain] >= attackCost;
@@ -1317,7 +1251,6 @@ const App: React.FC = () => {
           }
       }
       else if (action === 'EXPLORE_CLAIM') {
-          // Explorer Fatigue: First is free, subsequent cost is 2 Fixed
           const cost = p.actionsTaken === 0 ? 0 : 2;
           valid = p.resources[Resource.Grain] >= cost;
           if (!valid) addLog(`Fatigue: Next expansion costs ${cost} Grain.`, 'info');
@@ -1342,7 +1275,6 @@ const App: React.FC = () => {
   };
 
   const handleHexClick = (hexId: string) => {
-      // CLICK-SPAM PREVENTION
       if (gameState.uiState.isProcessing) return;
 
       const { isSelectingTile, actionType } = gameState.uiState;
@@ -1410,11 +1342,9 @@ const App: React.FC = () => {
            setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isProcessing: true } }));
 
            setGameState(prev => {
-               // Apply Cost
                const player = prev.players[0];
                const newRes = { ...player.resources };
                
-               // Relic Fatigue Logic Check
                const isRelicFree = player.activeRelicPower === 'FREE_FORTIFY' && player.actionsTaken === 0;
                const isFree = player.status.freeFortify || isRelicFree;
                
@@ -1465,7 +1395,6 @@ const App: React.FC = () => {
            setGameState(prev => {
                let ps = prev.players.map(p => p.id === 0 ? {...p, actionsTaken: p.actionsTaken + 1 } : p);
                
-               // COST DEDUCTION
                const attackCost = prev.players[0].actionsTaken === 0 ? 1 : 2;
                ps[0].resources[Resource.Grain] -= attackCost;
                ps[0] = updateMaxResources(ps[0]);
@@ -1564,8 +1493,6 @@ const App: React.FC = () => {
 
           let logMsg = `You claim tile [${getCoordString(map, pendingHexId)}] as ${TILE_CONFIG[declaredType].label}.`;
           
-          // Only grant Relic resource and objective progress if declared truthfully.
-          // Bluffing forgoes the immediate reward for the sake of secrecy.
           if (isRelicDiscovery) {
               players[myPlayerIndex].resources[Resource.Relic]++;
               players[myPlayerIndex] = updatePlayerStat(players[myPlayerIndex], 'relicSitesRevealed', 1);
@@ -1606,7 +1533,6 @@ const App: React.FC = () => {
 
   const SidebarContent = () => (
        <div className="h-full flex flex-col bg-[#0f172a] border-l border-slate-700">
-           {/* Sidebar Tabs */}
            <div className="flex border-b border-slate-700 shrink-0">
                   <button 
                       onClick={() => setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, activeSidebarTab: 'LOG' } }))}
@@ -1622,7 +1548,6 @@ const App: React.FC = () => {
                   </button>
               </div>
 
-              {/* Sidebar Content */}
               <div className="flex-1 overflow-y-auto p-0 bg-[#0f172a] custom-scrollbar">
                   {gameState.uiState.activeSidebarTab === 'LOG' ? (
                       <div className="p-3 space-y-2">
@@ -1648,7 +1573,6 @@ const App: React.FC = () => {
                                                </div>
                                                <div className="text-slate-200 mb-1 leading-relaxed">{log.text}</div>
                                                
-                                               {/* Dice Details */}
                                                {log.details?.dice && (
                                                    <div className="mt-2 p-1.5 bg-black/40 rounded flex justify-between items-center text-[11px] font-mono text-slate-300">
                                                        <div className="flex items-center gap-1">
@@ -1665,7 +1589,6 @@ const App: React.FC = () => {
                                                    </div>
                                                )}
 
-                                               {/* Bluff Details */}
                                                {log.details?.declaredType && (
                                                    <div className="mt-1 flex items-center gap-1 text-[10px]">
                                                        <VenetianMask size={10} className="text-purple-400" />
@@ -1681,7 +1604,6 @@ const App: React.FC = () => {
                       </div>
                   ) : (
                       <div className="p-4 space-y-4">
-                          {/* Active Objectives ALWAYS Visible Here */}
                           {humanPlayer && (
                               <div className="bg-slate-800 border border-[#ca8a04]/30 rounded p-3 mb-4">
                                   <div className="text-[10px] text-[#fcd34d] uppercase tracking-widest mb-2 flex items-center gap-2">
@@ -1699,7 +1621,6 @@ const App: React.FC = () => {
                               </div>
                           )}
                           
-                          {/* PUBLIC OBJECTIVES DISPLAY */}
                           <div className="bg-slate-800 border border-blue-500/30 rounded p-3 mb-4">
                               <div className="text-[10px] text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                                   <Crown size={12} /> Public Imperatives
@@ -1752,12 +1673,40 @@ const App: React.FC = () => {
       return <SplashScreen onStart={handleSplashStart} />;
   }
 
+  if (!gameStarted) {
+    return (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center overflow-hidden p-4 animate-in fade-in">
+            <div className="absolute inset-0 z-0">
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-[#0f0c29] to-black" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,_rgba(180,83,9,0.15),_transparent_70%)]" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90" />
+            </div>
+            <div className="relative z-10 text-center max-w-2xl w-full bg-black/60 backdrop-blur-md border border-[#ca8a04]/30 p-8 md:p-12 rounded-lg">
+                 <h1 className="text-4xl md:text-5xl font-title text-[#fcd34d] mb-4">Select Conflict Scale</h1>
+                 <p className="text-slate-400 mb-8">Choose the number of empires that will clash for supremacy.</p>
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <button onClick={() => startGame(2)} className="p-6 bg-slate-800/50 border border-slate-700 rounded-lg hover:bg-slate-800 hover:border-[#ca8a04] transition-all group">
+                         <h2 className="text-xl font-bold text-white mb-1">2 Players</h2>
+                         <p className="text-xs text-[#ca8a04] uppercase tracking-widest group-hover:text-white">Duel</p>
+                     </button>
+                     <button onClick={() => startGame(3)} className="p-6 bg-slate-800/50 border border-slate-700 rounded-lg hover:bg-slate-800 hover:border-[#ca8a04] transition-all group">
+                         <h2 className="text-xl font-bold text-white mb-1">3 Players</h2>
+                         <p className="text-xs text-[#ca8a04] uppercase tracking-widest group-hover:text-white">Skirmish</p>
+                     </button>
+                     <button onClick={() => startGame(4)} className="p-6 bg-slate-800/50 border border-slate-700 rounded-lg hover:bg-slate-800 hover:border-[#ca8a04] transition-all group">
+                         <h2 className="text-xl font-bold text-white mb-1">4 Players</h2>
+                         <p className="text-xs text-[#ca8a04] uppercase tracking-widest group-hover:text-white">Total War</p>
+                     </button>
+                 </div>
+            </div>
+        </div>
+    );
+  }
+
   if (gameState.phase === Phase.EndGame) {
     const rankedPlayers = gameState.players.map(p => {
-        // Calculate Score strictly from current map state
         const scoreData = calculateScore(p, gameState.map, gameState.publicObjectives);
         
-        // Calculate Bluff Count: Active tiles owned by player where type != publicType
         const bluffCount = (Object.values(gameState.map) as HexData[]).filter(h => 
             h.ownerId === p.id && h.type !== h.publicType
         ).length;
@@ -1775,7 +1724,7 @@ const App: React.FC = () => {
     return (
         <div className="h-screen w-full bg-[#0b0a14] text-[#e2d9c5] font-sans flex overflow-hidden relative">
             <div className="flex-1 relative bg-black border-r border-[#ca8a04]/30">
-                <HexGrid map={gameState.map} players={gameState.players} humanPlayerId={0} onHexClick={()=>{}} onHexHover={()=>{}} uiState={gameState.uiState} revealAll={true} />
+                <HexGrid map={gameState.map} players={gameState.players} humanPlayerId={0} onHexClick={()=>{}} onHexHover={()=>{}} uiState={gameState.uiState} revealAll={true} playerCount={gameState.players.length} />
             </div>
             <div className="w-full max-w-md md:max-w-lg bg-[#1e293b] flex flex-col border-l border-slate-700 shadow-2xl z-30">
                 <div className="p-6 md:p-8 flex-1 overflow-y-auto custom-scrollbar">
@@ -1790,7 +1739,6 @@ const App: React.FC = () => {
                                      </div>
                                      <div className="text-3xl font-bold text-white">{p.scoreData.total} VP</div>
                                  </div>
-                                 {/* Breakdown */}
                                  <div className="mt-2 text-[10px] text-slate-400 flex justify-between px-2 pt-2 border-t border-slate-700/50">
                                     <span>Tiles: {p.scoreData.breakdown.tileVp}</span>
                                     <span>Forts: {p.scoreData.breakdown.fortVp}</span>
@@ -1813,7 +1761,7 @@ const App: React.FC = () => {
 
                 </div>
                 <div className="p-6 bg-[#0f172a] border-t border-slate-700 text-center shrink-0">
-                    <button onClick={startGame} className="w-full px-8 py-4 bg-[#ca8a04] text-black font-bold text-lg rounded hover:bg-[#eab308]">Play Again</button>
+                    <button onClick={() => { setGameStarted(false); startGame(gameState.players.length); }} className="w-full px-8 py-4 bg-[#ca8a04] text-black font-bold text-lg rounded hover:bg-[#eab308]">Play Again</button>
                 </div>
             </div>
         </div>
@@ -1860,7 +1808,7 @@ const App: React.FC = () => {
                   const rIncome = realIncome[rKey];
                   return (
                       <div key={res} className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${res === 'Grain' ? 'bg-yellow-500' : res === 'Stone' ? 'bg-slate-400' : res === 'Gold' ? 'bg-amber-400' : 'bg-emerald-500'}`}></div>
+                          <ResourceIcon resource={rKey} size={16} />
                           <div className="flex flex-col items-end leading-none">
                               <span className="text-white font-bold">{val}</span>
                               <span className={`text-[10px] ${rIncome > 0 ? 'text-green-400' : 'text-slate-600'}`}>+{rIncome}</span>
@@ -1875,14 +1823,13 @@ const App: React.FC = () => {
           </div>
       </header>
 
-      {/* Mobile Resources Bar */}
       <div className="md:hidden bg-[#0f172a] border-b border-slate-800 p-1.5 flex justify-around text-xs font-mono shrink-0 z-10">
           {realIncome && Object.entries(gameState.players[0].resources).map(([res, val]) => {
               const rKey = res as Resource;
               const rIncome = realIncome[rKey];
               return (
                   <div key={res} className="flex items-center gap-1">
-                      <div className={`w-1.5 h-1.5 rounded-full ${res === 'Grain' ? 'bg-yellow-500' : res === 'Stone' ? 'bg-slate-400' : res === 'Gold' ? 'bg-amber-400' : 'bg-emerald-500'}`}></div>
+                      <ResourceIcon resource={rKey} size={14} />
                       <span className="text-white font-bold">{val}</span>
                       <span className={`text-[9px] ${rIncome > 0 ? 'text-green-400' : 'text-slate-600'}`}>+{rIncome}</span>
                   </div>
@@ -1892,7 +1839,7 @@ const App: React.FC = () => {
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
           <div className="flex-1 relative bg-[#050505] flex items-center justify-center overflow-hidden">
-              <HexGrid map={gameState.map} players={gameState.players} humanPlayerId={0} onHexClick={handleHexClick} onHexHover={() => {}} uiState={gameState.uiState} />
+              <HexGrid map={gameState.map} players={gameState.players} humanPlayerId={0} onHexClick={handleHexClick} onHexHover={() => {}} uiState={gameState.uiState} playerCount={gameState.players.length} />
               {gameState.uiState.isSelectingTile && (
                   <div className="absolute top-4 md:top-8 bg-black/80 backdrop-blur px-4 md:px-6 py-2 rounded-full border border-white/20 text-white animate-pulse z-30 pointer-events-none shadow-lg text-center text-xs md:text-sm mx-4">
                       {gameState.uiState.actionType === 'ACTIVATE' ? <span>Select a <span className="font-bold text-emerald-400">Hidden Relic</span></span> : <span>Select Target for <span className="font-bold text-[#fcd34d]">{gameState.uiState.actionType}</span></span>}
@@ -1964,9 +1911,18 @@ const App: React.FC = () => {
                            <div>
                                <p className="text-white text-lg mb-6">Choose <b>{resolvingEvent.amount}</b> more resource{resolvingEvent.amount! > 1 ? 's' : ''}.</p>
                                <div className="flex gap-4 justify-center">
-                                   <button onClick={()=>handleEventResourceChoice(Resource.Grain)} className="w-20 p-3 bg-yellow-900/40 border border-yellow-500 rounded hover:bg-yellow-900/80 flex flex-col items-center gap-2 transition-transform hover:-translate-y-1"><div className="w-6 h-6 rounded-full bg-yellow-500 shadow-[0_0_15px_#eab308]"></div><span className="font-bold text-yellow-100 text-xs">Grain</span></button>
-                                   <button onClick={()=>handleEventResourceChoice(Resource.Stone)} className="w-20 p-3 bg-slate-800/40 border border-slate-400 rounded hover:bg-slate-700/80 flex flex-col items-center gap-2 transition-transform hover:-translate-y-1"><div className="w-6 h-6 rounded-full bg-slate-400 shadow-[0_0_15px_#94a3b8]"></div><span className="font-bold text-slate-100 text-xs">Stone</span></button>
-                                   <button onClick={()=>handleEventResourceChoice(Resource.Gold)} className="w-20 p-3 bg-amber-900/40 border border-amber-500 rounded hover:bg-amber-900/80 flex flex-col items-center gap-2 transition-transform hover:-translate-y-1"><div className="w-6 h-6 rounded-full bg-amber-400 shadow-[0_0_15px_#f59e0b]"></div><span className="font-bold text-amber-100 text-xs">Gold</span></button>
+                                   <button onClick={()=>handleEventResourceChoice(Resource.Grain)} className="w-20 p-3 bg-yellow-900/40 border border-yellow-500 rounded hover:bg-yellow-900/80 flex flex-col items-center justify-center gap-2 transition-transform hover:-translate-y-1">
+                                       <ResourceIcon resource={Resource.Grain} size={28} />
+                                       <span className="font-bold text-yellow-100 text-xs uppercase">Grain</span>
+                                   </button>
+                                   <button onClick={()=>handleEventResourceChoice(Resource.Stone)} className="w-20 p-3 bg-slate-800/40 border border-slate-400 rounded hover:bg-slate-700/80 flex flex-col items-center justify-center gap-2 transition-transform hover:-translate-y-1">
+                                       <ResourceIcon resource={Resource.Stone} size={28} />
+                                       <span className="font-bold text-slate-100 text-xs uppercase">Stone</span>
+                                   </button>
+                                   <button onClick={()=>handleEventResourceChoice(Resource.Gold)} className="w-20 p-3 bg-amber-900/40 border border-amber-500 rounded hover:bg-amber-900/80 flex flex-col items-center justify-center gap-2 transition-transform hover:-translate-y-1">
+                                       <ResourceIcon resource={Resource.Gold} size={28} />
+                                       <span className="font-bold text-amber-100 text-xs uppercase">Gold</span>
+                                   </button>
                                </div>
                            </div>
                        ) : <button onClick={handleEventConfirm} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded uppercase tracking-widest transition-all">{resolvingEvent.isRelicPowered ? "Claim Power" : "Collect & Proceed"}</button>}
@@ -1986,6 +1942,7 @@ const App: React.FC = () => {
             map={gameState.map} 
             isActionPhaseDone={isActionPhaseDone}
             isEliminated={isHumanEliminated}
+            uiState={gameState.uiState}
           />
       </div>
     </div>
