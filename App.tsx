@@ -819,10 +819,10 @@ const App: React.FC = () => {
           let nextTurnOrderIndex = prev.turnOrderIndex;
 
           if (!allPassed) {
-              let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+              let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
               let attempts = 0;
-              while ((finalPlayersState[prev.turnOrder[nextIndex]].hasPassed || finalPlayersState[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
-                  nextIndex = (nextIndex + 1) % prev.players.length;
+              while ((finalPlayersState[prev.turnOrder[nextIndex]].hasPassed || finalPlayersState[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
+                  nextIndex = (nextIndex + 1) % prev.turnOrder.length;
                   attempts++;
               }
               nextTurnOrderIndex = nextIndex;
@@ -866,12 +866,13 @@ const App: React.FC = () => {
              };
         }
 
-        let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+        // FIXED: Use prev.turnOrder.length instead of prev.players.length to handle elimination resizing
+        let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
         
         let attempts = 0;
         
-        while ((prev.players[prev.turnOrder[nextIndex]].hasPassed || prev.players[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
-            nextIndex = (nextIndex + 1) % prev.players.length;
+        while ((prev.players[prev.turnOrder[nextIndex]].hasPassed || prev.players[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
+            nextIndex = (nextIndex + 1) % prev.turnOrder.length;
             attempts++;
         }
 
@@ -1169,10 +1170,11 @@ const App: React.FC = () => {
                        uiState: { ...prev.uiState, isProcessing: false }
                    };
                } else {
-                   let nextIndex = (prev.turnOrderIndex + 1) % prev.players.length;
+                   // Corrected logic using turnOrder.length to prevent crash on elimination
+                   let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
                    let attempts = 0;
-                   while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.players.length) {
-                       nextIndex = (nextIndex + 1) % prev.players.length;
+                   while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
+                       nextIndex = (nextIndex + 1) % prev.turnOrder.length;
                        attempts++;
                    }
                    
@@ -1768,7 +1770,7 @@ const App: React.FC = () => {
     }).sort((a,b) => b.scoreData.total - a.scoreData.total);
     
     const winner = rankedPlayers[0];
-    const isWinner = winner?.id === 0;
+    const isWinner = winner && winner.id === 0;
 
     return (
         <div className="h-screen w-full bg-[#0b0a14] text-[#e2d9c5] font-sans flex overflow-hidden relative">
@@ -1785,9 +1787,6 @@ const App: React.FC = () => {
                                      <span className="text-xl font-bold w-6 text-slate-500">#{idx + 1}</span>
                                      <div className="flex-1">
                                         <div className="font-bold text-lg" style={{ color: p.faction.color }}>{p.name}</div>
-                                        <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-wider">
-                                            <span className="text-purple-400">Bluffs: {p.bluffCount}</span>
-                                        </div>
                                      </div>
                                      <div className="text-3xl font-bold text-white">{p.scoreData.total} VP</div>
                                  </div>
@@ -1797,6 +1796,7 @@ const App: React.FC = () => {
                                     <span>Forts: {p.scoreData.breakdown.fortVp}</span>
                                     <span>Relics: {p.scoreData.breakdown.relicVp}</span>
                                     <span>Objectives: {p.scoreData.breakdown.totalObjVp}</span>
+                                    <span className="text-purple-400 font-bold uppercase tracking-widest">Bluffs: {p.bluffCount}</span>
                                  </div>
                             </div>
                         ))}
