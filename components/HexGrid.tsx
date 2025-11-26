@@ -1,9 +1,10 @@
 
 import React from 'react';
 import { HexData, Player, TileType, Resource } from '../types';
-import { HEX_SIZE, TILE_CONFIG, RESOURCE_COLORS } from '../constants';
+import { HEX_SIZE, TILE_CONFIG } from '../constants';
 import { hexPixelCoordinates, isAdjacent } from '../utils/hexUtils';
-import { Mountain, Trees, Hexagon, Gem, TowerControl, Flag, Wheat, Coins, VenetianMask, AlertTriangle } from 'lucide-react';
+import { Hexagon, TowerControl, Flag, VenetianMask, Amphora } from 'lucide-react';
+import ResourceIcon from './ResourceIcon';
 
 interface HexGridProps {
   map: Record<string, HexData>;
@@ -13,9 +14,10 @@ interface HexGridProps {
   onHexHover: (hexId: string | null) => void;
   uiState: { isSelectingTile: boolean; actionType: string | null; selectedHexId: string | null };
   revealAll?: boolean; // NEW: For end game summary
+  playerCount: number; // NEW: For dynamic zoom
 }
 
-const HexGrid: React.FC<HexGridProps> = ({ map, players, humanPlayerId, onHexClick, onHexHover, uiState, revealAll = false }) => {
+const HexGrid: React.FC<HexGridProps> = ({ map, players, humanPlayerId, onHexClick, onHexHover, uiState, revealAll = false, playerCount }) => {
   const hexPoints = (size: number) => {
     const angles = [0, 60, 120, 180, 240, 300];
     return angles.map((deg) => {
@@ -28,21 +30,13 @@ const HexGrid: React.FC<HexGridProps> = ({ map, players, humanPlayerId, onHexCli
   const points = hexPoints(HEX_SIZE - 1); 
 
   const myTiles = (Object.values(map) as HexData[]).filter((h) => h.ownerId === humanPlayerId);
-
-  const getResourceIcon = (res: Resource) => {
-      switch(res) {
-          case Resource.Grain: return <Wheat size={16} stroke={RESOURCE_COLORS[res]} strokeWidth={2} className="drop-shadow-sm"/>; 
-          case Resource.Stone: return <Mountain size={16} stroke={RESOURCE_COLORS[res]} strokeWidth={2} className="drop-shadow-sm"/>; 
-          case Resource.Gold: return <Coins size={16} stroke={RESOURCE_COLORS[res]} strokeWidth={2} className="drop-shadow-sm"/>;
-          case Resource.Relic: return <Trees size={16} stroke={RESOURCE_COLORS[res]} strokeWidth={2} className="drop-shadow-sm"/>;
-          default: return null;
-      }
-  }
+  
+  // Dynamic Zoom based on map size
+  const viewBox = playerCount === 2 ? "-300 -300 600 600" : "-425 -425 850 850";
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-[#050505] overflow-hidden">
-      {/* Zoomed out viewbox to ensure larger 7x7 maps fit on screens */}
-      <svg viewBox="-425 -425 850 850" className="w-full h-full pointer-events-auto filter drop-shadow-2xl touch-manipulation">
+      <svg viewBox={viewBox} className="w-full h-full pointer-events-auto filter drop-shadow-2xl touch-manipulation">
         {(Object.values(map) as HexData[]).map((hex) => {
           const { x, y } = hexPixelCoordinates(hex.q, hex.r, HEX_SIZE);
           
@@ -131,11 +125,11 @@ const HexGrid: React.FC<HexGridProps> = ({ map, players, humanPlayerId, onHexCli
 
               {isVisible && (
                  <g className="pointer-events-none">
-                     {displayedType === TileType.Ruins && <Gem size={18} x={-9} y={-9} stroke="#e2e8f0" strokeWidth={2} className="drop-shadow-md"/>}
+                     {displayedType === TileType.Ruins && <Amphora size={18} x={-9} y={-9} stroke="#e2e8f0" strokeWidth={2} className="drop-shadow-md"/>}
                      
                      {TILE_CONFIG[displayedType].resource && (
                          <g transform="translate(-8, -8)">
-                             {getResourceIcon(TILE_CONFIG[displayedType].resource!)}
+                             <ResourceIcon resource={TILE_CONFIG[displayedType].resource!} size={16} />
                          </g>
                      )}
 

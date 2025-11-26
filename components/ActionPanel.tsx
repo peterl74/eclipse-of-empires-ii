@@ -2,25 +2,40 @@
 import React, { useState } from 'react';
 import { Phase, Player, CitizenType, HexData, TileType, Resource } from '../types';
 import { CITIZEN_INFO } from '../constants';
-import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw } from 'lucide-react';
+import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw, Amphora } from 'lucide-react';
 
 interface ActionPanelProps {
   phase: Phase;
   player: Player;
   isMyTurn: boolean;
-  activePlayerName?: string; // NEW: Name of the player whose turn it currently is
+  activePlayerName?: string;
   onSelectCitizen: (c: CitizenType) => void;
   onAction: (action: string, payload?: any) => void;
   onEndPhase: () => void;
   map?: Record<string, HexData>; 
   isActionPhaseDone?: boolean;
+  isEliminated?: boolean;
+  uiState: {
+    isSelectingTile: boolean;
+    isDeclaring: boolean;
+    isProcessing: boolean;
+  };
 }
 
-const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, activePlayerName, onSelectCitizen, onAction, onEndPhase, map, isActionPhaseDone }) => {
+const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, activePlayerName, onSelectCitizen, onAction, onEndPhase, map, isActionPhaseDone, isEliminated, uiState }) => {
   
   const [isReselecting, setIsReselecting] = useState(false);
   const hasRuins = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.Ruins) : false;
   const hasHiddenRelic = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.RelicSite && h.publicType !== TileType.RelicSite) : false;
+
+  if (isEliminated) {
+    return (
+        <div className="w-full bg-red-950 border-t-2 border-red-500 p-4 flex flex-col items-center justify-center text-center shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0 h-full">
+            <h2 className="text-red-400 font-bold font-title text-xl uppercase tracking-widest">You Have Been Eliminated</h2>
+            <p className="text-slate-400 text-sm mt-1">Your empire has fallen. You may continue to observe the outcome of the war.</p>
+        </div>
+    );
+  }
 
   const renderCitizenSelection = (title: string, btnLabel: string, onConfirm: () => void) => (
       <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-3 shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0 animate-in slide-in-from-bottom duration-300">
@@ -116,11 +131,9 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
       const expandCost = player.actionsTaken === 0 ? 0 : 2;
       const canExpand = player.resources.Grain >= expandCost;
       
-      // Attack: Cost 1 Grain
-      const canAttack = player.status.canAttack && player.resources.Grain >= 1;
-
-      // Emergency Market: 3 Stone or 3 Gold or 3 Relics
-      const canMarket = player.resources.Stone >= 3 || player.resources.Gold >= 3 || player.resources.Relic >= 3;
+      // Attack: Cost 1 Grain (First), 2 Grain (Subsequent)
+      const attackCost = player.actionsTaken === 0 ? 1 : 2;
+      const canAttack = player.status.canAttack && player.resources.Grain >= attackCost;
 
       // Determine Role Color
       const roleColor = role === CitizenType.Warrior ? '#ef4444' : role === CitizenType.Builder ? '#22c55e' : role === CitizenType.Merchant ? '#eab308' : '#3b82f6';
@@ -169,20 +182,21 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                   <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-bold uppercase tracking-widest" style={{color: roleColor}}>Active Council: <span className="text-white">{role}</span></h3>
                       <div className="flex gap-2">
-                         {/* Emergency Market Button */}
+                         {/* Emergency Market Button - OPEN MODAL */}
                          <button
-                            onClick={() => onAction('TRADE_MARKET')}
-                            disabled={!isMyTurn || !canMarket}
-                            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs border transition-colors ${isMyTurn && canMarket ? 'border-orange-500 bg-orange-900/30 text-orange-200 hover:bg-orange-900/50' : 'border-slate-700 bg-slate-800 text-slate-500 opacity-50 grayscale'}`}
-                            title="Trade 3 Excess (Gold/Stone/Relic) -> 1 Grain"
+                            onClick={() => onAction('OPEN_MARKET')}
+                            disabled={!isMyTurn}
+                            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs border transition-colors ${isMyTurn ? 'border-orange-500 bg-orange-900/30 text-orange-200 hover:bg-orange-900/50' : 'border-slate-700 bg-slate-800 text-slate-500 opacity-50 grayscale'}`}
+                            title="Open Market Exchange"
                          >
                             <RefreshCcw size={12}/>
                             <span>Market</span>
                          </button>
                          <button 
                               onClick={() => setIsReselecting(true)}
-                              disabled={!isMyTurn}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-50 transition-colors"
+                              disabled={!isMyTurn || uiState.isSelectingTile || uiState.isDeclaring || uiState.isProcessing}
+                              title={(uiState.isSelectingTile || uiState.isDeclaring) ? "Finish current action first" : "Change Council"}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                           >
                               <RotateCcw size={12}/>
                               <span>Change</span>
@@ -230,7 +244,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Sword size={20} className="text-red-400 mb-1"/>
                              <span className="text-[10px] font-bold text-red-100 uppercase">Attack</span>
                              <span className="text-[8px] text-red-200/60">
-                                 Cost: 1 Grain
+                                 Cost: {attackCost} Grain
                              </span>
                           </button>
                       )}
@@ -251,7 +265,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                                 disabled={!isMyTurn || !hasRuins}
                                 className={`flex flex-col items-center justify-center p-3 rounded border w-24 shrink-0 transition-all ${isMyTurn && hasRuins ? 'bg-purple-900/40 border-purple-500 hover:bg-purple-900/60' : 'bg-slate-800/50 border-slate-700 opacity-50 grayscale'}`}
                             >
-                                <Sparkles size={20} className="text-purple-400 mb-1"/>
+                                <Amphora size={20} className="text-purple-400 mb-1"/>
                                 <span className="text-[10px] font-bold text-purple-100 uppercase">Scavenge</span>
                                 <span className="text-[8px] text-purple-200/60">Ruins Only</span>
                             </button>
