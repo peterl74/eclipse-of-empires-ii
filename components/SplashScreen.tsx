@@ -1,36 +1,32 @@
 
 import React, { useState } from 'react';
-import { Play, Sparkles, Map, Users, EyeOff, Crown } from 'lucide-react';
+import { Play, Crown, Beaker, FlaskConical } from 'lucide-react';
 
 interface SplashScreenProps {
   onStart: () => void;
+  onOpenSim: () => void;
+  onOpenStrategyLab: () => void;
 }
 
-const SplashScreen: React.FC<SplashScreenProps> = ({ onStart }) => {
+const SplashScreen: React.FC<SplashScreenProps> = ({ onStart, onOpenSim, onOpenStrategyLab }) => {
   const [isLeaving, setIsLeaving] = useState(false);
 
   const handleStart = () => {
     setIsLeaving(true);
-    // Delay actual start slightly to allow exit animation
     setTimeout(onStart, 800);
   };
 
   return (
     <div className={`fixed inset-0 z-[100] bg-black flex flex-col items-center justify-between overflow-hidden transition-opacity duration-1000 ${isLeaving ? 'opacity-0' : 'opacity-100'}`}>
       
-      {/* 1. BACKGROUND LAYER (CSS Only - No Image) */}
+      {/* 1. BACKGROUND LAYER */}
       <div className="absolute inset-0 z-0">
-        {/* Deep Space Gradient Base */}
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-[#0f0c29] to-black" />
-        
-        {/* Subtle Radial Highlight for depth */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,_rgba(180,83,9,0.15),_transparent_70%)] animate-pulse" style={{ animationDuration: '4s' }} />
-        
-        {/* Cinematic Vignette Overlay */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90" />
       </div>
 
-      {/* 2. TOP SECTION: TITLE */}
+      {/* 2. TOP SECTION */}
       <div className="relative z-10 pt-16 md:pt-24 text-center animate-in slide-in-from-top-10 fade-in duration-1000">
         <div className="mb-4">
             <div className="inline-block p-1 border border-[#ca8a04]/50 rounded-full mb-4 bg-black/50 backdrop-blur">
@@ -45,60 +41,45 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onStart }) => {
         </p>
       </div>
 
-      {/* 3. MIDDLE SPACER */}
+      {/* 3. SPACER */}
       <div className="flex-1"></div>
 
-      {/* 4. BOTTOM SECTION: BRIEF & BUTTON */}
+      {/* 4. BOTTOM SECTION */}
       <div className="relative z-10 w-full max-w-4xl px-6 pb-12 md:pb-16 flex flex-col items-center animate-in slide-in-from-bottom-10 fade-in duration-1000 delay-300">
         
-        {/* The "Hook" - Quick Rules */}
-        <div className="w-full bg-black/60 backdrop-blur-md border-t border-b border-[#ca8a04]/30 p-6 md:p-8 mb-8 text-center">
-            <h3 className="text-[#fcd34d] text-xs font-bold uppercase tracking-widest mb-4 border-b border-white/10 pb-2 inline-block">
-                Command The Cycle
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm text-slate-300">
-                <div className="flex flex-col items-center gap-2">
-                    <Users className="text-blue-400" size={20} />
-                    <span className="font-bold text-white">CHOOSE</span>
-                    <span className="text-xs text-slate-400">your Role each Eclipse</span>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                    <Map className="text-emerald-400" size={20} />
-                    <span className="font-bold text-white">EXPAND</span>
-                    <span className="text-xs text-slate-400">across the fractured void</span>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                    <EyeOff className="text-purple-400" size={20} />
-                    <span className="font-bold text-white">BLUFF</span>
-                    <span className="text-xs text-slate-400">your true riches</span>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                    <Sparkles className="text-amber-400" size={20} />
-                    <span className="font-bold text-white">SEIZE</span>
-                    <span className="text-xs text-slate-400">Relics of power</span>
-                </div>
-            </div>
-        </div>
-
-        {/* The Button */}
+        {/* Main Action Button */}
         <button 
           onClick={handleStart}
-          className="group relative px-12 py-4 bg-gradient-to-r from-[#b45309] to-[#ca8a04] hover:from-[#d97706] hover:to-[#f59e0b] text-black font-bold text-xl uppercase tracking-widest rounded shadow-[0_0_20px_rgba(234,179,8,0.4)] hover:shadow-[0_0_40px_rgba(234,179,8,0.6)] hover:scale-105 transition-all duration-300"
+          className="group relative w-full max-w-md px-12 py-6 mb-8 bg-gradient-to-r from-[#b45309] to-[#ca8a04] hover:from-[#d97706] hover:to-[#f59e0b] text-black font-bold text-2xl uppercase tracking-widest rounded shadow-[0_0_20px_rgba(234,179,8,0.4)] hover:shadow-[0_0_40px_rgba(234,179,8,0.6)] hover:scale-105 transition-all duration-300"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center gap-4">
              <span className="font-serif">Initialize Conquest</span>
-             <Play size={20} fill="currentColor" className="group-hover:translate-x-1 transition-transform"/>
+             <Play size={24} fill="currentColor" className="group-hover:translate-x-1 transition-transform"/>
           </div>
-          
-          {/* Shine Effect */}
           <div className="absolute inset-0 rounded overflow-hidden">
              <div className="absolute top-0 left-[-100%] w-[50%] h-full bg-white/20 -skew-x-12 group-hover:left-[200%] transition-all duration-700 ease-in-out" />
           </div>
         </button>
 
-        <div className="mt-4 text-[10px] text-slate-500 uppercase tracking-widest">
-            Alpha Build 2.0 • System Ready
+        {/* Simulation Grid */}
+        <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+            <button 
+                onClick={onOpenSim} 
+                className="flex flex-col items-center justify-center p-4 bg-slate-900/80 border border-slate-700 rounded hover:bg-slate-800 hover:border-slate-500 transition-all group"
+            >
+                <Beaker size={20} className="text-slate-400 group-hover:text-white mb-2" />
+                <span className="text-xs text-slate-400 font-bold uppercase tracking-widest group-hover:text-white">Balance Sim</span>
+            </button>
+            <button 
+                onClick={onOpenStrategyLab} 
+                className="flex flex-col items-center justify-center p-4 bg-slate-900/80 border border-slate-700 rounded hover:bg-slate-800 hover:border-[#fcd34d] transition-all group"
+            >
+                <FlaskConical size={20} className="text-[#fcd34d] mb-2" />
+                <span className="text-xs text-[#fcd34d] font-bold uppercase tracking-widest">Strategy Lab</span>
+            </button>
         </div>
+
+        <div className="mt-6 text-[9px] text-slate-600 uppercase tracking-widest">Alpha Build 2.0</div>
 
       </div>
     </div>

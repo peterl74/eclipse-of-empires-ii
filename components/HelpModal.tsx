@@ -41,7 +41,7 @@ const GUIDE_DATA: Category[] = [
           tableData: [
             { label: "Warrior Attack", value: "Costs 1 Grain per attack. No Grain = No Fighting." },
             { label: "Explorer Expand", value: "1st Expansion is Free. Subsequent expansions in the same round cost 1 Grain." },
-            { label: "Builder Fortify", value: "Costs 1 Stone + 1 Gold. (Unless you have the 'Free Fortify' Relic Power)." }
+            { label: "Builder Fortify", value: "Costs 2 Stone. (Unless you have the 'Free Fortify' Relic Power)." }
           ]
         },
         {
@@ -71,10 +71,10 @@ const GUIDE_DATA: Category[] = [
           heading: "Citizen Roles",
           content: "Chosen secretly at the start of Phase II. Your role defines your primary action for the round.",
           tableData: [
-            { label: "Warrior", value: "Action: Attack. Passive: +1 Combat Strength. Cost: 1 Grain." },
-            { label: "Builder", value: "Action: Fortify. Effect: Adds +1 Defense to tile. Cost: 1 Stone + 1 Gold." },
+            { label: "Warrior", value: "Action: Attack. Effect: Conquer tile & Loot 1 Resource on win. Cost: 1 Grain." },
+            { label: "Builder", value: "Action: Fortify. Effect: +1 Defense AND +1 Resource Production. Cost: 2 Stone." },
             { label: "Merchant", value: "Action: Trade. Effect: Exchange 2 Grain -> 1 Gold (Better ratio than Market)." },
-            { label: "Explorer", value: "Action: Expand. Effect: Claim Neutral/Fog tiles. Cost: Free (1st), then 1 Grain." }
+            { label: "Explorer", value: "Action: Expand. Effect: Claim Neutral/Fog tiles. Cost: 1 Grain (Flat)." }
           ]
         }
       ]
@@ -122,7 +122,7 @@ const GUIDE_DATA: Category[] = [
         {
           heading: "Outcomes",
           content: [
-            "Win: Defender loses tile. Fortification destroyed. Attacker occupies.",
+            "Win: Defender loses tile. Fortification destroyed. Attacker occupies and LOOTS 1 Resource.",
             "Loss/Tie: Nothing changes. Attacker still pays 1 Grain cost."
           ]
         }
@@ -262,7 +262,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
           <div className="p-4 md:p-6 border-b border-slate-700">
             <h2 className="text-[#fcd34d] font-title text-xl leading-none hidden md:block">Field Manual</h2>
             <h2 className="text-[#fcd34d] font-title text-xl leading-none md:hidden text-center">FM</h2>
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.0-Alpha</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.0-Beta</span>
           </div>
           <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
             {GUIDE_DATA.map(category => (

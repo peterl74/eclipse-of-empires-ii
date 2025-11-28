@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Phase, Player, CitizenType, HexData, TileType, Resource } from '../types';
 import { CITIZEN_INFO } from '../constants';
@@ -123,12 +122,12 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
       // Calculate costs or conditions
       const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= 2;
       
-      // Fortify: Free if (Relic && FirstAction) OR Status.FreeFortify. Otherwise cost 1S/1G.
+      // Fortify: Free if (Relic && FirstAction) OR Status.FreeFortify. Otherwise cost 2 Stone.
       const isRelicFortifyFree = player.activeRelicPower === 'FREE_FORTIFY' && player.actionsTaken === 0;
-      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= 1 && player.resources.Gold >= 1);
+      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= 2);
       
-      // Expand: Static Fatigue (Free, then 2 Grain fixed)
-      const expandCost = player.actionsTaken === 0 ? 0 : 2;
+      // Expand: Flat cost 1 Grain
+      const expandCost = 1;
       const canExpand = player.resources.Grain >= expandCost;
       
       // Attack: Cost 1 Grain (First), 2 Grain (Subsequent)
@@ -230,7 +229,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Hammer size={20} className="text-green-400 mb-1"/>
                              <span className="text-[10px] font-bold text-green-100 uppercase">Fortify</span>
                              <span className="text-[8px] text-green-200/60">
-                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : "1 Stone, 1 Gold"}
+                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : "2 Stone"}
                              </span>
                           </button>
                       )}
@@ -258,7 +257,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                             >
                                 <Compass size={20} className="text-blue-400 mb-1"/>
                                 <span className="text-[10px] font-bold text-blue-100 uppercase">Expand</span>
-                                <span className="text-[8px] text-blue-200/60">{player.actionsTaken === 0 ? "Free" : `Cost: ${expandCost} Grain`}</span>
+                                <span className="text-[8px] text-blue-200/60">Cost: 1 Grain</span>
                             </button>
                             <button 
                                 onClick={() => onAction('EXPLORE_RUIN')}
