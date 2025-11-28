@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Phase, Player, CitizenType, HexData, TileType, Resource } from '../types';
 import { CITIZEN_INFO } from '../constants';
@@ -27,14 +28,8 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
   const hasRuins = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.Ruins) : false;
   const hasHiddenRelic = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.RelicSite && h.publicType !== TileType.RelicSite) : false;
 
-  if (isEliminated) {
-    return (
-        <div className="w-full bg-red-950 border-t-2 border-red-500 p-4 flex flex-col items-center justify-center text-center shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0 h-full">
-            <h2 className="text-red-400 font-bold font-title text-xl uppercase tracking-widest">You Have Been Eliminated</h2>
-            <p className="text-slate-400 text-sm mt-1">Your empire has fallen. You may continue to observe the outcome of the war.</p>
-        </div>
-    );
-  }
+  // REMOVED: Top-level blocking if (isEliminated) return ...
+  // Instead, we handle isEliminated inside each phase to allow "Next" buttons.
 
   const renderCitizenSelection = (title: string, btnLabel: string, onConfirm: () => void) => (
       <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-3 shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0 animate-in slide-in-from-bottom duration-300">
@@ -87,12 +82,14 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
 
   if (phase === Phase.Income) {
       return (
-          <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-2 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
+          <div className={`w-full ${isEliminated ? 'bg-red-950 border-red-500' : 'bg-[#0f172a] border-[#ca8a04]'} border-t p-2 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0`}>
              <div>
-               <h2 className="text-[#fcd34d] font-bold text-sm font-title">Phase I: Income</h2>
+               <h2 className={`${isEliminated ? 'text-red-400' : 'text-[#fcd34d]'} font-bold text-sm font-title`}>
+                   {isEliminated ? "Eliminated - Phase I: Income" : "Phase I: Income"}
+               </h2>
                <p className="text-slate-400 text-[10px]">Resources collected.</p>
              </div>
-             <button onClick={onEndPhase} className="bg-[#ca8a04] text-black font-bold px-4 py-1 rounded hover:bg-[#eab308] flex items-center gap-2 text-xs">
+             <button onClick={onEndPhase} className={`${isEliminated ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-[#ca8a04] hover:bg-[#eab308] text-black'} font-bold px-4 py-1 rounded flex items-center gap-2 text-xs`}>
                  <span>Next</span> <Play size={14}/>
              </button>
           </div>
@@ -100,10 +97,35 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
   }
 
   if (phase === Phase.CitizenChoice) {
+      if (isEliminated) {
+           return (
+              <div className="w-full bg-red-950 border-t border-red-500 p-3 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
+                 <div>
+                   <h2 className="text-red-400 font-bold text-sm font-title">Eliminated</h2>
+                   <p className="text-slate-400 text-[10px]">The Council gathers without you.</p>
+                 </div>
+                 <button onClick={onEndPhase} className="bg-red-600 text-white font-bold px-4 py-1 rounded hover:bg-red-500 flex items-center gap-2 text-xs">
+                     <span>Proceed as Spectator</span> <Play size={14}/>
+                 </button>
+              </div>
+           );
+      }
       return renderCitizenSelection("Phase II: The Council", "Confirm Selection", onEndPhase);
   }
 
   if (phase === Phase.Action) {
+      if (isEliminated) {
+         return (
+             <div className="w-full bg-red-950 border-t border-red-500 p-3 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
+                 <div className="flex flex-col">
+                    <span className="text-red-400 font-bold text-sm uppercase tracking-widest block">Eliminated</span>
+                    <span className="text-xs text-red-300/60">Spectator Mode Active</span>
+                 </div>
+                 <div className="text-xs text-red-300 animate-pulse">Observing Action Phase...</div>
+             </div>
+         );
+      }
+      
       if (player.hasPassed) {
          return (
              <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-3 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
@@ -316,12 +338,12 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
   
   if (phase === Phase.Scoring) {
      return (
-          <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-3 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
+          <div className={`w-full ${isEliminated ? 'bg-red-950 border-red-500' : 'bg-[#0f172a] border-[#ca8a04]'} border-t p-3 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0`}>
              <div>
-               <h2 className="text-[#fcd34d] font-bold text-sm font-title">Phase V: Scoring</h2>
+               <h2 className={`${isEliminated ? 'text-red-400' : 'text-[#fcd34d]'} font-bold text-sm font-title`}>Phase V: Scoring</h2>
                <p className="text-slate-400 text-[10px]">Tallying Victory Points...</p>
              </div>
-             <button onClick={onEndPhase} className="bg-[#ca8a04] text-black font-bold px-4 py-1 rounded hover:bg-[#eab308] flex items-center gap-2 text-xs">
+             <button onClick={onEndPhase} className={`${isEliminated ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-[#ca8a04] hover:bg-[#eab308] text-black'} font-bold px-4 py-1 rounded flex items-center gap-2 text-xs`}>
                  <span>Next Eclipse</span> <RotateCcw size={14}/>
              </button>
           </div>
