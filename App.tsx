@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
@@ -9,8 +8,11 @@ import HelpModal from './components/HelpModal';
 import MarketModal from './components/MarketModal';
 import TurnOrderTracker from './components/TurnOrderTracker';
 import SplashScreen from './components/SplashScreen';
+import SimulationOverlay from './components/SimulationOverlay';
+import WelcomeModal from './components/WelcomeModal'; // IMPORT ADDED
+import SimulationRunner from './components/SimulationRunner';
 import ResourceIcon from './components/ResourceIcon';
-import { Eye, EyeOff, Trophy, Scroll, Target, Zap, X, Users, BookOpen, Info, Sword, Hammer, Coins, Crown, VenetianMask } from 'lucide-react';
+import { Eye, EyeOff, Trophy, Scroll, Target, Zap, X, Users, BookOpen, Info, Sword, Hammer, Coins, Crown, VenetianMask, Beaker, FlaskConical } from 'lucide-react';
 
 // --- HELPER: Deck Management ---
 
@@ -174,14 +176,17 @@ const getIncomeRate = (player: Player, map: Record<string, HexData>, usePublicTy
         if (hex.ownerId === player.id) {
             const typeToCheck = usePublicTypes ? hex.publicType : hex.type;
             
+            // MECHANIC: Fortified Industry (+1 Production if fortified)
+            const fortificationBonus = hex.fortification ? 1 : 0;
+
             if (typeToCheck === TileType.Capital) {
-                rates[Resource.Grain]++;
-                rates[Resource.Stone]++;
-                rates[Resource.Gold]++;
+                rates[Resource.Grain] += (1 + fortificationBonus);
+                rates[Resource.Stone] += (1 + fortificationBonus);
+                rates[Resource.Gold] += (1 + fortificationBonus);
             } else {
                 const config = TILE_CONFIG[typeToCheck];
                 if (config && config.resource) {
-                    rates[config.resource]++;
+                    rates[config.resource] += (1 + fortificationBonus);
                 }
             }
         }
@@ -233,6 +238,8 @@ interface ResolvingEvent {
 
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
+  const [showSim, setShowSim] = useState(false);
+  const [showStrategyLab, setShowStrategyLab] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showLogModal, setShowLogModal] = useState(false); 
@@ -243,6 +250,7 @@ const App: React.FC = () => {
     turnOrderIndex: 0,
     turnOrder: [],
     turnTrigger: 0,
+    passOrder: [],
     players: [],
     map: {},
     logs: [],
@@ -287,6 +295,7 @@ const App: React.FC = () => {
           turnOrderIndex: 0,
           turnOrder: initialTurnOrder,
           turnTrigger: 0,
+          passOrder: [],
           players: initialPlayers,
           map: newMap,
           logs: [{ id: 'init', turn: 1, text: 'Eclipse 1 Begins. Secret Directives Assigned.', type: 'phase' }],
@@ -341,7 +350,7 @@ const App: React.FC = () => {
   };
 
   const updateMaxResources = (player: Player): Player => {
-      const total = Object.values(player.resources).reduce((a,b) => a+b, 0);
+      const total = Object.values(player.resources).reduce((a: number, b: number) => a + b, 0);
       if (total > player.stats.maxResourcesHeld) {
           return { ...player, stats: { ...player.stats, maxResourcesHeld: total } };
       }
@@ -567,7 +576,12 @@ const App: React.FC = () => {
              return realType;
           };
 
-          if (!actionTaken && ai.resources[Resource.Grain] < 1) {
+          // BALANCE FIX: Proactive AI Rations
+          let requiredGrain = 0;
+          if (role === CitizenType.Warrior) requiredGrain = ai.actionsTaken === 0 ? 1 : 2;
+          if (role === CitizenType.Explorer) requiredGrain = 1; 
+
+          if (!actionTaken && ai.resources[Resource.Grain] < requiredGrain) {
               if (ai.resources[Resource.Gold] >= 3) {
                   ai.resources[Resource.Gold] -= 3;
                   ai.resources[Resource.Grain] += 1;
@@ -629,13 +643,12 @@ const App: React.FC = () => {
           else if (!actionTaken && role === CitizenType.Builder) {
               const myUnfortified = myTiles.filter(t => !t.fortification);
               const isFree = (ai.activeRelicPower === 'FREE_FORTIFY' && ai.actionsTaken === 0) || ai.status.freeFortify;
-              const costStone = isFree ? 0 : 1;
-              const costGold = isFree ? 0 : 1;
+              const costStone = isFree ? 0 : 2; // BALANCE FIX: Builder Cost 2 Stone
+              const costGold = 0;
 
-              if (myUnfortified.length > 0 && ai.resources[Resource.Stone] >= costStone && ai.resources[Resource.Gold] >= costGold) {
+              if (myUnfortified.length > 0 && ai.resources[Resource.Stone] >= costStone) {
                    const target = myUnfortified[Math.floor(Math.random() * myUnfortified.length)];
                    ai.resources[Resource.Stone] -= costStone;
-                   ai.resources[Resource.Gold] -= costGold;
                    newMap[target.id].fortification = { ownerId: ai.id, level: 1 };
                    logText = `${ai.name} fortifies [${getCoordString(newMap, target.id)}]${isFree ? " (Free - Relic)" : ""}.`;
                    actionTaken = true;
@@ -682,6 +695,16 @@ const App: React.FC = () => {
                           logText = `${ai.name} ATTACKS ${defender.name} at [${getCoordString(newMap, targetIdHex)}]!`;
                           logDetails = { dice: { att: attStr, def: defStr, attRoll: rollAtt, defRoll: rollDef } };
                           logType = 'combat';
+
+                          // MECHANIC: PILLAGE (AI)
+                          const stealable = [Resource.Grain, Resource.Stone, Resource.Gold].filter(r => defender.resources[r] > 0);
+                          if (stealable.length > 0) {
+                              const stolenRes = stealable[Math.floor(Math.random() * stealable.length)];
+                              defender.resources[stolenRes] = Math.max(0, defender.resources[stolenRes] - 1);
+                              ai.resources[stolenRes]++;
+                              logText += ` Looted 1 ${stolenRes}!`;
+                          }
+
                       } else {
                           logText = `${ai.name} FAILS attack on ${defender.name} at [${getCoordString(newMap, targetIdHex)}].`;
                           logDetails = { dice: { att: attStr, def: defStr, attRoll: rollAtt, defRoll: rollDef } };
@@ -694,7 +717,7 @@ const App: React.FC = () => {
           }
 
           else if (!actionTaken && role === CitizenType.Explorer) {
-               const costGrain = ai.actionsTaken === 0 ? 0 : 2;
+               const costGrain = 1; // BALANCE FIX: Explorer flat 1 Grain
                
                if (ai.resources[Resource.Grain] >= costGrain) {
                    const ruins = myTiles.filter(h => h.type === TileType.Ruins);
@@ -760,6 +783,12 @@ const App: React.FC = () => {
               details: logDetails
           };
 
+          // --- PASS ORDER UPDATE (AI) ---
+          let newPassOrder = [...prev.passOrder];
+          if (!actionTaken) {
+              if (!newPassOrder.includes(playerId)) newPassOrder.push(playerId);
+          }
+
           const newLogs = [...prev.logs, newLogEntry];
           const finalPlayersState = newPlayers;
 
@@ -785,7 +814,8 @@ const App: React.FC = () => {
             eventDeck: currentEventDeck, 
             discardPile: currentDiscardPile,
             turnOrderIndex: nextTurnOrderIndex,
-            turnTrigger: prev.turnTrigger + 1
+            turnTrigger: prev.turnTrigger + 1,
+            passOrder: newPassOrder // Update state with new pass order
           };
       });
   };
@@ -865,7 +895,7 @@ const App: React.FC = () => {
 
           let nextRound = prev.round;
           let newActiveEvent = null;
-          let partialUpdate = { players: prev.players, map: prev.map };
+          let partialUpdate: any = { players: prev.players, map: prev.map, passOrder: prev.passOrder }; // partialUpdate needs any to add new keys dynamically if needed, but safer to stick to interface props
           let nextTurnOrderIndex = 0;
           let nextTurnOrder = prev.turnOrder;
           let currentEventDeck = prev.eventDeck;
@@ -882,24 +912,46 @@ const App: React.FC = () => {
             partialUpdate.players = playersAfterElimination;
 
             const activePlayers = playersAfterElimination.filter(p => !p.isEliminated);
+            
+            // --- NEW TURN ORDER LOGIC (First to Pass goes First) ---
             if (activePlayers.length > 0) {
-                const activePlayerIds = activePlayers.map(p => p.id).sort((a, b) => a - b);
-                const shift = (nextRound - 1) % activePlayers.length;
-                nextTurnOrder = [...activePlayerIds.slice(shift), ...activePlayerIds.slice(0, shift)];
-                nextTurnOrderIndex = 0;
+                if (nextRound > 1 && prev.passOrder.length > 0) {
+                    // Filter passOrder to only include active players (in case someone was eliminated)
+                    const validPassOrder = prev.passOrder.filter(id => !playersAfterElimination[id].isEliminated);
+                    // Find players who didn't pass (rare, but robust) or are new
+                    const missing = activePlayers.map(p => p.id).filter(id => !validPassOrder.includes(id)).sort((a,b) => a - b);
+                    
+                    nextTurnOrder = [...validPassOrder, ...missing];
+                    
+                    logs.push({ 
+                        id: `order-${nextRound}`, 
+                        turn: nextRound, 
+                        text: `Turn Order determined by passing: ${nextTurnOrder.map(id => playersAfterElimination[id].name).join(" → ")}`, 
+                        type: 'info' 
+                    });
+                } else {
+                    // Fallback for Round 1 or if empty
+                    const activePlayerIds = activePlayers.map(p => p.id).sort((a, b) => a - b);
+                    const shift = (nextRound - 1) % activePlayers.length;
+                    nextTurnOrder = [...activePlayerIds.slice(shift), ...activePlayerIds.slice(0, shift)];
+                    
+                    const firstPlayerName = playersAfterElimination.find(p => p.id === nextTurnOrder[0])?.name || "Unknown";
+                    logs.push({ 
+                        id: `init-${nextRound}`, 
+                        turn: nextRound, 
+                        text: `Turn Order updated. ${firstPlayerName} goes first.`, 
+                        type: 'info' 
+                    });
+                }
                 
-                const firstPlayerName = playersAfterElimination.find(p => p.id === nextTurnOrder[0])?.name || "Unknown";
-
-                logs.push({ 
-                    id: `init-${nextRound}`, 
-                    turn: nextRound, 
-                    text: `Turn Order updated. ${firstPlayerName} goes first.`, 
-                    type: 'info' 
-                });
+                nextTurnOrderIndex = 0;
             } else {
                 nextTurnOrder = [];
                 nextTurnOrderIndex = 0;
             }
+            
+            // RESET PASS ORDER FOR NEW ROUND
+            partialUpdate.passOrder = [];
           }
 
           if (nextP === Phase.Events) {
@@ -938,7 +990,7 @@ const App: React.FC = () => {
             }
           }
 
-          let newPlayers = partialUpdate.players.map(p => {
+          let newPlayers = partialUpdate.players.map((p: Player) => {
               const currentScore = calculateScore(p, partialUpdate.map, newPublicObjectives);
               return {
                   ...p,
@@ -970,7 +1022,7 @@ const App: React.FC = () => {
                    }
                }
 
-               newPlayers = newPlayers.map(p => {
+               newPlayers = newPlayers.map((p: Player) => {
                    if (p.isEliminated) return p;
 
                    if (p.activeRelicPower === 'TRADE_BARON') {
@@ -994,7 +1046,7 @@ const App: React.FC = () => {
 
           if (nextP === Phase.Action) {
               logs.push({ id: 'reveal', turn: prev.round, text: "Council Session - Citizens Revealed", type: 'phase' });
-              newPlayers.forEach(p => {
+              newPlayers.forEach((p: Player) => {
                  if(!p.isHuman && !p.isEliminated) logs.push({id:`rev-${p.id}`, turn:prev.round, text:`${p.name} is a ${p.selectedCitizen}`, type:'info', actorId: p.id});
               });
           }
@@ -1014,7 +1066,8 @@ const App: React.FC = () => {
               discardPile: currentDiscardPile, 
               objectiveDeck: currentObjectiveDeck,
               publicObjectives: newPublicObjectives,
-              uiState: { ...prev.uiState } 
+              uiState: { ...prev.uiState },
+              passOrder: partialUpdate.passOrder !== undefined ? partialUpdate.passOrder : prev.passOrder
           };
       });
   };
@@ -1099,13 +1152,18 @@ const App: React.FC = () => {
                const activePlayers = newPlayers.filter(p => !p.isEliminated);
                const allPassed = activePlayers.every(p => p.hasPassed);
                
+               // --- PASS ORDER UPDATE (Human) ---
+               const newPassOrder = [...prev.passOrder];
+               if (!newPassOrder.includes(0)) newPassOrder.push(0);
+
                if (allPassed) {
                    return {
                        ...prev,
                        players: newPlayers,
                        logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass. All players passed. Events Phase beginning.", type:'phase', actorId: 0}],
                        turnTrigger: prev.turnTrigger + 1,
-                       uiState: { ...prev.uiState, isProcessing: false }
+                       uiState: { ...prev.uiState, isProcessing: false },
+                       passOrder: newPassOrder
                    };
                } else {
                    let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
@@ -1121,7 +1179,8 @@ const App: React.FC = () => {
                        turnOrderIndex: nextIndex,
                        turnTrigger: prev.turnTrigger + 1,
                        logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass for this Eclipse.", type:'info', actorId: 0}],
-                       uiState: { ...prev.uiState, isProcessing: false }
+                       uiState: { ...prev.uiState, isProcessing: false },
+                       passOrder: newPassOrder
                    };
                }
            });
@@ -1239,8 +1298,8 @@ const App: React.FC = () => {
           if (isFree) {
               valid = true;
           } else {
-              valid = p.resources[Resource.Stone] >= 1 && p.resources[Resource.Gold] >= 1;
-              if (!valid) addLog("Need 1 Stone + 1 Gold.", 'info');
+              valid = p.resources[Resource.Stone] >= 2; // BALANCE FIX: 2 Stone Cost
+              if (!valid) addLog("Need 2 Stone.", 'info');
           }
       }
       else if (action === 'WARRIOR_ATTACK') {
@@ -1251,9 +1310,9 @@ const App: React.FC = () => {
           }
       }
       else if (action === 'EXPLORE_CLAIM') {
-          const cost = p.actionsTaken === 0 ? 0 : 2;
+          const cost = 1; // BALANCE FIX: 1 Grain Cost (Flat)
           valid = p.resources[Resource.Grain] >= cost;
-          if (!valid) addLog(`Fatigue: Next expansion costs ${cost} Grain.`, 'info');
+          if (!valid) addLog(`Exploration now costs 1 Grain.`, 'info');
       }
       else if (action === 'ACTIVATE_RELIC') valid = true;
 
@@ -1349,8 +1408,7 @@ const App: React.FC = () => {
                const isFree = player.status.freeFortify || isRelicFree;
                
                if (!isFree) {
-                   newRes[Resource.Stone] -= 1;
-                   newRes[Resource.Gold] -= 1;
+                   newRes[Resource.Stone] -= 2; // BALANCE FIX: 2 Stone Cost
                }
 
                const ps = prev.players.map(p => p.id === 0 ? {...p, resources: newRes, actionsTaken: p.actionsTaken + 1} : p);
@@ -1417,6 +1475,28 @@ const App: React.FC = () => {
                    logMsg = `Victory against ${defender.name} at [${getCoordString(nm, hexId)}]!`;
                    ps[0] = updatePlayerStat(ps[0], 'battlesWon', 1);
                    ps[defender.id] = updatePlayerStat(ps[defender.id], 'tilesLost', 1);
+
+                   // MECHANIC: PILLAGE (Human)
+                   // We need to access the defender from the previous state since they might not be in the modified 'ps' array yet if we only mapped ID 0.
+                   // Actually, we must rebuild the ps array to modify both players safely.
+                   
+                   const attacker = { ...ps[0] };
+                   const victim = { ...prev.players[defender.id] };
+                   
+                   const stealable = ([Resource.Grain, Resource.Stone, Resource.Gold] as Resource[]).filter(r => victim.resources[r] > 0);
+                   if (stealable.length > 0) {
+                       const stolenRes = stealable[Math.floor(Math.random() * stealable.length)];
+                       victim.resources[stolenRes] = Math.max(0, victim.resources[stolenRes] - 1);
+                       attacker.resources[stolenRes]++;
+                       logMsg += ` Looted 1 ${stolenRes}!`;
+                   }
+                   
+                   // Now put them back into the array
+                   ps = ps.map(p => {
+                       if (p.id === attacker.id) return attacker;
+                       if (p.id === victim.id) return victim;
+                       return p;
+                   });
 
                } else {
                    logMsg = `Defeat against ${defender.name} at [${getCoordString(nm, hexId)}].`;
@@ -1485,7 +1565,7 @@ const App: React.FC = () => {
 
           players[myPlayerIndex] = updatePlayerStat(players[myPlayerIndex], 'tilesRevealed', 1);
           
-          const cost = players[myPlayerIndex].actionsTaken === 0 ? 0 : 2;
+          const cost = 1; // BALANCE FIX: Flat 1 Grain
           if (cost > 0) {
               players[myPlayerIndex].resources[Resource.Grain] -= cost;
           }
@@ -1553,7 +1633,8 @@ const App: React.FC = () => {
                       <div className="p-3 space-y-2">
                           {gameState.logs.map(log => {
                                const actor = log.actorId !== undefined ? gameState.players[log.actorId] : null;
-                               
+                               const dice = log.details?.dice;
+
                                return (
                                    <div key={log.id} className={`text-xs p-3 rounded border-l-2 transition-all animate-in fade-in slide-in-from-left-2 ${
                                        log.type === 'combat' ? 'border-red-500 bg-red-900/10' :
@@ -1573,17 +1654,17 @@ const App: React.FC = () => {
                                                </div>
                                                <div className="text-slate-200 mb-1 leading-relaxed">{log.text}</div>
                                                
-                                               {log.details?.dice && (
+                                               {dice && (
                                                    <div className="mt-2 p-1.5 bg-black/40 rounded flex justify-between items-center text-[11px] font-mono text-slate-300">
                                                        <div className="flex items-center gap-1">
                                                             <Sword size={12} className="text-slate-400"/>
-                                                            <span className="text-white font-bold">{log.details.dice.att + log.details.dice.attRoll}</span>
-                                                            <span className="text-slate-500">({log.details.dice.att}+{log.details.dice.attRoll})</span>
+                                                            <span className="text-white font-bold">{dice.att + dice.attRoll}</span>
+                                                            <span className="text-slate-500">({dice.att}+{dice.attRoll})</span>
                                                        </div>
                                                        <span className="text-slate-600">vs</span>
                                                        <div className="flex items-center gap-1">
-                                                            <span className="text-white font-bold">{log.details.dice.def + log.details.dice.defRoll}</span>
-                                                            <span className="text-slate-500">({log.details.dice.def}+{log.details.dice.defRoll})</span>
+                                                            <span className="text-white font-bold">{dice.def + dice.defRoll}</span>
+                                                            <span className="text-slate-500">({dice.def}+{dice.defRoll})</span>
                                                             <Hammer size={12} className="text-slate-400"/>
                                                        </div>
                                                    </div>
@@ -1604,6 +1685,7 @@ const App: React.FC = () => {
                       </div>
                   ) : (
                       <div className="p-4 space-y-4">
+                          {/* Intel Content (Same as before) */}
                           {humanPlayer && (
                               <div className="bg-slate-800 border border-[#ca8a04]/30 rounded p-3 mb-4">
                                   <div className="text-[10px] text-[#fcd34d] uppercase tracking-widest mb-2 flex items-center gap-2">
@@ -1670,7 +1752,19 @@ const App: React.FC = () => {
   );
 
   if (showSplash) {
-      return <SplashScreen onStart={handleSplashStart} />;
+      return <SplashScreen 
+                onStart={handleSplashStart} 
+                onOpenSim={() => setShowSim(true)} 
+                onOpenStrategyLab={() => setShowStrategyLab(true)} 
+             />;
+  }
+
+  if (showSim) {
+      return <SimulationOverlay onClose={() => setShowSim(false)} />;
+  }
+
+  if (showStrategyLab) {
+      return <SimulationRunner onClose={() => setShowStrategyLab(false)} />;
   }
 
   if (!gameStarted) {
@@ -1711,12 +1805,22 @@ const App: React.FC = () => {
             h.ownerId === p.id && h.type !== h.publicType
         ).length;
 
+        const totalResources = Object.values(p.resources).reduce((a: number, b: number)=>a+b,0);
+        const totalTiles = (Object.values(gameState.map) as HexData[]).filter(h => h.ownerId === p.id).length;
+
         return {
           ...p,
           scoreData,
-          bluffCount
+          bluffCount,
+          totalResources,
+          totalTiles
         };
-    }).sort((a,b) => b.scoreData.total - a.scoreData.total);
+    }).sort((a,b) => {
+        // Tie Breaker Logic
+        if (b.scoreData.total !== a.scoreData.total) return b.scoreData.total - a.scoreData.total;
+        if (b.totalTiles !== a.totalTiles) return b.totalTiles - a.totalTiles;
+        return b.totalResources - a.totalResources;
+    });
     
     const winner = rankedPlayers[0];
     const isWinner = winner && winner.id === 0;
@@ -1787,6 +1891,8 @@ const App: React.FC = () => {
                   </div>
               </div>
               <div className="flex gap-1 md:gap-2">
+                <button onClick={() => setShowSim(true)} className="hidden md:flex items-center gap-2 px-2 md:px-3 py-1 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700 transition-colors text-slate-300 text-xs font-bold uppercase"><Beaker size={14}/> Sim</button>
+                <button onClick={() => setShowStrategyLab(true)} className="hidden md:flex items-center gap-2 px-2 md:px-3 py-1 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700 transition-colors text-slate-300 text-xs font-bold uppercase text-[#fcd34d] border-[#ca8a04]/30"><FlaskConical size={14}/> Lab</button>
                 <button onClick={() => setShowHelpModal(true)} className="flex items-center gap-2 px-2 md:px-3 py-1 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700 transition-colors text-slate-300 text-xs font-bold uppercase"><Info size={14}/> Help</button>
                 <button onClick={() => setShowLogModal(true)} className="md:hidden flex items-center gap-2 px-2 py-1 bg-slate-800 border border-slate-600 rounded hover:bg-slate-700 transition-colors text-slate-300 text-xs font-bold uppercase"><BookOpen size={14}/></button>
               </div>
@@ -1862,6 +1968,7 @@ const App: React.FC = () => {
                   </div>
               </div>
           )}
+          <WelcomeModal onClose={() => {}} /> 
           <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
           <MarketModal 
                 isOpen={gameState.uiState.isMarketOpen} 

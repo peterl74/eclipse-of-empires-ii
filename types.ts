@@ -168,6 +168,7 @@ export interface GameState {
   turnOrderIndex: number; // Index in the turnOrder array
   turnOrder: number[]; // Array of player IDs
   turnTrigger: number; // NEW: Counter that increments every step to force effect re-evaluation
+  passOrder: number[]; // NEW: Tracks order of passing to determine next round initiative
   players: Player[];
   map: Record<string, HexData>;
   logs: LogEntry[];

@@ -54,10 +54,10 @@ export const RESOURCE_COLORS: Record<Resource, string> = {
 };
 
 export const CITIZEN_INFO: Record<CitizenType, { description: string; color: string; icon: string }> = {
-  [CitizenType.Merchant]: { description: "Trade 2 same -> 1 any. Bluff needs.", color: "#eab308", icon: "Scale" },
-  [CitizenType.Builder]: { description: "Fortify Specialist. Cannot Claim.", color: "#22c55e", icon: "Hammer" },
-  [CitizenType.Warrior]: { description: "Attack! +1 Str. Steal tiles.", color: "#ef4444", icon: "Sword" },
-  [CitizenType.Explorer]: { description: "Claim (Free). Reveal True Types.", color: "#3b82f6", icon: "Compass" }
+  [CitizenType.Merchant]: { description: "Trade 2 Grain -> 1 Gold. Fix economy.", color: "#eab308", icon: "Scale" },
+  [CitizenType.Builder]: { description: "Fortify: +1 Defense & +1 Income.", color: "#22c55e", icon: "Hammer" },
+  [CitizenType.Warrior]: { description: "Attack: +1 Str. Win = Steal Loot.", color: "#ef4444", icon: "Sword" },
+  [CitizenType.Explorer]: { description: "Claim & Reveal. Cost: 1 Grain.", color: "#3b82f6", icon: "Compass" }
 };
 
 export const FACTIONS: FactionInfo[] = [
