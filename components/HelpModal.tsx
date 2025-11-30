@@ -10,7 +10,7 @@ interface HelpModalProps {
 interface Section {
   heading: string;
   content?: string | string[];
-  tableData?: { label: string; value: string }[];
+  tableData?: { label: string; value: string; href?: string }[];
 }
 
 interface Category {
@@ -344,6 +344,31 @@ const GUIDE_DATA: Category[] = [
           ]
         }
       ]
+    },
+    {
+      id: "credits",
+      title: "Credits & Acknowledgments",
+      icon: <Info size={18} />,
+      sections: [
+        {
+          heading: "ECLIPSE OF EMPIRES II Prototype Edition v2.4",
+          content: [
+            "Game Design & Concept: Peter Loizou",
+            "Playtesting & Development: Tested in Bridport, UK.",
+            "Status: Work in Progress. Not for resale."
+          ]
+        },
+        {
+          heading: "Special Thanks",
+          content: "To the strategists at Julian's Monday Night Chess Club for their invaluable feedback, tactical insight, and patience in the fog of war."
+        },
+        {
+          heading: "Contact & Feedback",
+          tableData: [
+              { label: "Feedback", value: "Email Designer", href: "mailto:peterloizou@gmail.com" }
+          ]
+        }
+      ]
     }
 ];
 
@@ -370,7 +395,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
           <div className="p-4 md:p-6 border-b border-slate-700">
             <h2 className="text-[#fcd34d] font-title text-xl leading-none hidden md:block">Field Manual</h2>
             <h2 className="text-[#fcd34d] font-title text-xl leading-none md:hidden text-center">FM</h2>
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.1-Live</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.4-Dev</span>
           </div>
           <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
             {GUIDE_DATA.map(category => (
@@ -432,7 +457,17 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                   {section.tableData.map((row, i) => (
                                       <div key={i} className="flex flex-col md:flex-row md:items-center justify-between bg-black/20 p-3 rounded border border-slate-700/50 hover:border-slate-600 transition-colors">
                                           <span className="font-bold text-slate-200 text-sm mb-1 md:mb-0 w-1/3">{row.label}</span>
-                                          <span className="text-slate-400 text-xs md:text-sm md:text-right flex-1">{row.value}</span>
+                                          {row.href ? (
+                                              <a href={row.href} className="text-[#fcd34d] hover:underline hover:text-yellow-300 text-xs md:text-sm md:text-right flex-1 transition-colors">
+                                                  {row.value}
+                                              </a>
+                                          ) : row.value.includes('@') ? (
+                                              <a href={`mailto:${row.value}`} className="text-[#fcd34d] hover:underline hover:text-yellow-300 text-xs md:text-sm md:text-right flex-1 transition-colors font-mono">
+                                                  {row.value}
+                                              </a>
+                                          ) : (
+                                              <span className="text-slate-400 text-xs md:text-sm md:text-right flex-1">{row.value}</span>
+                                          )}
                                       </div>
                                   ))}
                               </div>
