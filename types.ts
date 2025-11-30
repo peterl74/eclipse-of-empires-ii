@@ -100,6 +100,18 @@ export interface PlayerStats {
 
 export type RelicPowerType = 'PASSIVE_INCOME' | 'FREE_FORTIFY' | 'WARLORD' | 'TRADE_BARON' | 'DOUBLE_TIME' | null;
 
+// --- AI PSYCHOLOGY TYPES ---
+export type DiplomaticStance = 'War' | 'Hostile' | 'Neutral' | 'Pact' | 'Ally';
+export type TraitType = 'Aggressive' | 'Cautious' | 'Greedy' | 'Expansionist' | 'Paranoid' | 'Vengeful' | 'Peaceful' | 'Treacherous';
+
+export interface AiState {
+    fear: number;      // 0-100: Fear of Human capability
+    suspicion: number; // 0-100: Suspicion of Human intent
+    diplomaticStance: DiplomaticStance;
+    activeTraits: TraitType[];
+    lastDialogue?: string;
+}
+
 export interface Player {
   id: number;
   name: string;
@@ -131,6 +143,9 @@ export interface Player {
   // Lifetime Stats for Objectives
   stats: PlayerStats;
 
+  // AI Psychology (Only relevant for non-human players)
+  aiState?: AiState;
+
   // Temporary Statuses (Reset each Eclipse)
   status: {
     canAttack: boolean;
@@ -142,6 +157,7 @@ export interface Player {
     passiveIncome: boolean; 
     freeFortify: boolean;
     extraActions: number; // For Forced March
+    turnLost: boolean; // NEW: If true, player must pass immediately next turn (Challenge Penalty)
   };
 }
 
@@ -149,7 +165,7 @@ export interface LogEntry {
   id: string;
   turn: number;
   text: string;
-  type: 'info' | 'combat' | 'event' | 'phase' | 'bluff';
+  type: 'info' | 'combat' | 'event' | 'phase' | 'bluff' | 'alert' | 'diplomacy';
   actorId?: number;
   targetId?: number;
   details?: {
@@ -161,6 +177,15 @@ export interface LogEntry {
 }
 
 export type SidebarTab = 'LOG' | 'RIVALS';
+
+export interface PendingChallenge {
+    declarerId: number;
+    hexId: string;
+    declaredType: TileType;
+    realType: TileType;
+    timer: number; // Seconds remaining to challenge
+    isActive: boolean;
+}
 
 export interface GameState {
   phase: Phase;
@@ -185,6 +210,7 @@ export interface GameState {
   };
   
   activeEvent: { card: EventCard; isRelicPowered: boolean } | null;
+  pendingChallenge: PendingChallenge | null; // NEW: Tracks the challenge window
 
   // Card Decks
   eventDeck: EventCard[];
