@@ -51,7 +51,7 @@ const createSimPlayers = (map: Record<string, HexData>, playerCount: number): Pl
             actionsTaken: 0,
             isEliminated: false,
             stats: { battlesWon: 0, tilesRevealed: 0, relicEventsTriggered: 0, maxResourcesHeld: 0, tilesLost: 0, attacksMade: 0, uniquePlayersAttacked: [], relicSitesRevealed: 0 },
-            status: { canAttack: true, combatBonus: 0, fortificationBlocked: false, incomeMultiplier: 1, freeTrades: 0, passiveIncome: false, freeFortify: false, extraActions: 0 }
+            status: { canAttack: true, combatBonus: 0, fortificationBlocked: false, incomeMultiplier: 1, freeTrades: 0, passiveIncome: false, freeFortify: false, extraActions: 0, turnLost: false }
         });
     });
     return players;
