@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { X, ShieldCheck, Zap, BrainCircuit, Box } from 'lucide-react';
+import { X, ShieldCheck, Zap, BrainCircuit, Box, Users, Skull, AlertTriangle } from 'lucide-react';
 
 interface WelcomeModalProps {
   onClose: () => void;
@@ -50,49 +51,49 @@ const WelcomeModal: React.FC<WelcomeModalProps> = ({ onClose, forceShow = false 
                 Welcome to the Eclipse
             </h2>
             <p className="text-slate-400 text-[10px] md:text-xs uppercase tracking-wide mt-1 md:mt-2 relative z-10">
-                Digital Companion Edition
+                Digital Companion Edition v2.1
             </p>
         </div>
 
         {/* Content - Scrollable */}
         <div className="p-4 md:p-8 bg-[#0b0a14] space-y-4 md:space-y-6 text-[#e2d9c5] overflow-y-auto custom-scrollbar flex-1">
             <p className="text-sm leading-relaxed text-slate-300 text-center">
-                While this App faithfully recreates the empire building of <b>Eclipse of Empires II</b>, it handles the "Fog of War" differently than the physical board game.
+                Your empire awaits. The world is full of hidden dangers and treacherous rivals. Choose your path wisely.
             </p>
 
             <div className="grid grid-cols-1 gap-3 md:gap-4">
-                <div className="flex gap-3 md:gap-4 p-3 bg-slate-900/50 border border-slate-800 rounded-lg items-start">
-                    <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30 shrink-0">
-                        <ShieldCheck className="text-blue-400" size={18} />
+                <div className="flex gap-3 md:gap-4 p-3 bg-red-900/10 border border-red-500/30 rounded-lg items-start">
+                    <div className="p-2 bg-red-900/20 rounded border border-red-500/30 shrink-0">
+                        <Skull className="text-red-400" size={18} />
                     </div>
                     <div>
-                        <h4 className="text-blue-200 font-bold text-xs md:text-sm uppercase mb-1">The Code is the Banker</h4>
+                        <h4 className="text-red-200 font-bold text-xs md:text-sm uppercase mb-1">New: Challenge Mode</h4>
                         <p className="text-[10px] md:text-xs text-slate-400 leading-relaxed">
-                            Income is calculated automatically based on the <b>True Type</b> of your tiles. It is impossible to "cheat the bank" or commit tax fraud in this version.
-                        </p>
-                    </div>
-                </div>
-
-                <div className="flex gap-3 md:gap-4 p-3 bg-slate-900/50 border border-slate-800 rounded-lg items-start">
-                    <div className="p-2 bg-emerald-900/20 rounded border border-emerald-500/30 shrink-0">
-                        <Zap className="text-emerald-400" size={18} />
-                    </div>
-                    <div>
-                        <h4 className="text-emerald-200 font-bold text-xs md:text-sm uppercase mb-1">No Challenges Required</h4>
-                        <p className="text-[10px] md:text-xs text-slate-400 leading-relaxed">
-                            Since the App handles math honestly, the <b>"Challenge"</b> mechanic—used to catch liars in the tabletop game—has been removed to streamline play.
+                            Select <b>Challenge Mode</b> at the start for aggressive AI that forms coalitions against you. Rivals will actively <b>Challenge</b> your tile claims if they suspect you are bluffing!
                         </p>
                     </div>
                 </div>
 
                 <div className="flex gap-3 md:gap-4 p-3 bg-slate-900/50 border border-slate-800 rounded-lg items-start">
                     <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30 shrink-0">
-                        <BrainCircuit className="text-purple-400" size={18} />
+                        <AlertTriangle className="text-purple-400" size={18} />
                     </div>
                     <div>
-                        <h4 className="text-purple-200 font-bold text-xs md:text-sm uppercase mb-1">Pure Strategy</h4>
+                        <h4 className="text-purple-200 font-bold text-xs md:text-sm uppercase mb-1">Bluffing & Interception</h4>
                         <p className="text-[10px] md:text-xs text-slate-400 leading-relaxed">
-                            Your deception here comes from <b>Hidden Information</b>—bluffing about what your face-down tiles are to entice or repel enemies.
+                            When AI Rivals expand, you may now interrupt to <b>Challenge</b> their claim. If you catch them lying, you gain VP and neutralize the tile. Be careful—false accusations cost Gold!
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex gap-3 md:gap-4 p-3 bg-slate-900/50 border border-slate-800 rounded-lg items-start">
+                    <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30 shrink-0">
+                        <ShieldCheck className="text-blue-400" size={18} />
+                    </div>
+                    <div>
+                        <h4 className="text-blue-200 font-bold text-xs md:text-sm uppercase mb-1">Automated Banking</h4>
+                        <p className="text-[10px] md:text-xs text-slate-400 leading-relaxed">
+                            Unlike the tabletop version, income is calculated automatically based on <b>True Tile Types</b>. You cannot cheat the bank, only your rivals.
                         </p>
                     </div>
                 </div>
@@ -104,7 +105,7 @@ const WelcomeModal: React.FC<WelcomeModalProps> = ({ onClose, forceShow = false 
                 <div className="text-[10px] md:text-xs">
                     <span className="text-[#fcd34d] font-bold uppercase block mb-1">Want the full psychological experience?</span>
                     <span className="text-slate-300">
-                        In the <b>Tabletop Edition</b>, players physically draw tokens, allowing for "Financial Fraud." If you want to look your friends in the eye and lie to their faces, play the board game!
+                        In the <b>Tabletop Edition</b>, players physically draw tokens, allowing for "Financial Fraud." If you want to lie to your friends' faces, play the board game!
                     </span>
                 </div>
             </div>

@@ -45,19 +45,11 @@ const GUIDE_DATA: Category[] = [
           ]
         },
         {
-          heading: "Emergency Market (Soft-Lock Protection)",
+          heading: "Bluffing & Challenging",
           content: [
-            "A fail-safe mechanic for players who are 'rich but starving'.",
-            "Universal Trade: Swap 3 of ANY resource (Stone/Gold/Relic) to gain 1 Grain.",
-            "Accessible to all classes, separate from Merchant abilities."
-          ]
-        },
-        {
-          heading: "Bluffing System",
-          content: [
-            "Private Truth: You see the true type of your tiles (e.g., Goldmine).",
-            "Public Lie: You broadcast a 'Declared Type' (e.g., Plains) to opponents.",
-            "Detection: There is no direct 'Spy' action. Opponents must infer lies by watching your Income generation in the Intel tab."
+            "Private Truth: You see the true type of your tiles.",
+            "Public Lie: You declare a tile type to rivals.",
+            "HOW TO CHALLENGE: There is no 'Call Bluff' button. You challenge a claim by ATTACKING the territory. If you conquer it, the true nature is revealed to all."
           ]
         }
       ]

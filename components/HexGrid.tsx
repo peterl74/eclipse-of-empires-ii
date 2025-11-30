@@ -108,6 +108,8 @@ const HexGrid: React.FC<HexGridProps> = ({ map, players, humanPlayerId, onHexCli
               key={hex.id} 
               transform={`translate(${x},${y})`} 
               onClick={() => !revealAll && onHexClick(hex.id)} 
+              onMouseEnter={() => onHexHover(hex.id)}
+              onMouseLeave={() => onHexHover(null)}
               className={`group ${revealAll ? 'cursor-default' : 'cursor-pointer'} transition-opacity duration-300`}
               style={{ opacity: uiState.isSelectingTile && !isValidTarget ? 0.3 : 1 }}
             >
