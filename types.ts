@@ -65,7 +65,10 @@ export type EventEffectType =
   | 'TRADE_FREE'
   | 'PASSIVE_INCOME'   // New
   | 'FREE_FORTIFY'     // New
-  | 'DOUBLE_ACTION';   // New
+  | 'DOUBLE_ACTION'    // New
+  | 'WARLORD'
+  | 'TRADE_BARON'
+  | 'DOUBLE_TIME';
 
 export interface EventCard {
   id: string;
@@ -102,7 +105,7 @@ export type RelicPowerType = 'PASSIVE_INCOME' | 'FREE_FORTIFY' | 'WARLORD' | 'TR
 
 // --- AI PSYCHOLOGY TYPES ---
 export type DiplomaticStance = 'War' | 'Hostile' | 'Neutral' | 'Pact' | 'Ally';
-export type TraitType = 'Aggressive' | 'Cautious' | 'Greedy' | 'Expansionist' | 'Paranoid' | 'Vengeful' | 'Peaceful' | 'Treacherous';
+export type TraitType = 'Aggressive' | 'Cautious' | 'Greedy' | 'Expansionist' | 'Paranoid' | 'Vengeful' | 'Peaceful' | 'Treacherous' | 'Defensive';
 
 export interface AiState {
     fear: number;      // 0-100: Fear of Human capability

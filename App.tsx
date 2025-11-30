@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
-import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType, AiState, PendingChallenge } from './types';
+import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType, AiState, PendingChallenge, TraitType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
 import { FACTIONS, TOTAL_ROUNDS, EVENTS_DECK, OBJECTIVES_DECK, TILE_CONFIG, VP_CONFIG, FACTION_TRAITS, AI_DIALOGUE, RESOURCE_COLORS } from './constants';
 import HexGrid from './components/HexGrid';
@@ -90,7 +91,7 @@ const createInitialPlayers = (map: Record<string, HexData>, objectiveDeck: Secre
           fear: isChallengeMode ? 20 : 0, 
           suspicion: isChallengeMode ? 20 : 0,
           diplomaticStance: 'Neutral',
-          activeTraits: FACTION_TRAITS[faction.name] || ['Cautious'],
+          activeTraits: FACTION_TRAITS[faction.name] || (['Cautious'] as TraitType[]),
           lastDialogue: undefined
       };
 
@@ -696,9 +697,10 @@ const App: React.FC = () => {
              return realType;
           };
 
+          const fatigue = ai.actionsTaken > 0 ? 1 : 0;
           let requiredGrain = 0;
-          if (role === CitizenType.Warrior) requiredGrain = ai.actionsTaken === 0 ? 1 : 2;
-          if (role === CitizenType.Explorer) requiredGrain = 1; 
+          if (role === CitizenType.Warrior) requiredGrain = ai.actionsTaken === 0 ? 1 : 2; // Existing Warrior logic
+          if (role === CitizenType.Explorer) requiredGrain = 1 + fatigue; // Updated Explorer Fatigue
 
           if (!actionTaken && ai.resources[Resource.Grain] < requiredGrain) {
               if (ai.resources[Resource.Gold] >= 3) {
@@ -740,15 +742,17 @@ const App: React.FC = () => {
 
           else if (!actionTaken && (role === CitizenType.Merchant || ai.resources[Resource.Grain] > 4)) {
               const freeTradeAvailable = ai.status.freeTrades > 0; 
+              const tradeCost = 2 + fatigue;
+              
               if (freeTradeAvailable) {
                    ai.status.freeTrades--;
                    ai.resources[Resource.Gold] += 1;
                    logText = `${ai.name} uses Merchant's Seal for free Gold.`;
                    actionTaken = true;
-              } else if (ai.resources[Resource.Grain] >= 2) {
-                  ai.resources[Resource.Grain] -= 2;
+              } else if (ai.resources[Resource.Grain] >= tradeCost) {
+                  ai.resources[Resource.Grain] -= tradeCost;
                   ai.resources[Resource.Gold] += 1;
-                  logText = `${ai.name} trades 2 Grain for 1 Gold.`;
+                  logText = `${ai.name} trades ${tradeCost} Grain for 1 Gold.`;
                   actionTaken = true;
               }
           } 
@@ -756,7 +760,7 @@ const App: React.FC = () => {
           else if (!actionTaken && role === CitizenType.Builder) {
               const myUnfortified = myTiles.filter(t => !t.fortification);
               const isFree = (ai.activeRelicPower === 'FREE_FORTIFY' && ai.actionsTaken === 0) || ai.status.freeFortify;
-              const costStone = isFree ? 0 : 2; 
+              const costStone = isFree ? 0 : (2 + fatigue); 
 
               if (myUnfortified.length > 0 && ai.resources[Resource.Stone] >= costStone) {
                    const target = myUnfortified[Math.floor(Math.random() * myUnfortified.length)];
@@ -836,7 +840,7 @@ const App: React.FC = () => {
           }
 
           else if (!actionTaken && role === CitizenType.Explorer) {
-               const costGrain = 1; 
+               const costGrain = 1 + fatigue; // FATIGUE applied to expansion
                
                if (ai.resources[Resource.Grain] >= costGrain) {
                    const ruins = myTiles.filter(h => h.type === TileType.Ruins);
@@ -995,29 +999,44 @@ const App: React.FC = () => {
 
         let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
         let loop = 0;
-        let playerToPlay = prev.players[prev.turnOrder[nextIndex]];
-        let logs = [...prev.logs];
-        let ps = [...prev.players];
         
         while(loop < prev.players.length) {
-             playerToPlay = prev.players[prev.turnOrder[nextIndex]];
+             const playerToPlay = prev.players[prev.turnOrder[nextIndex]];
              
              if (playerToPlay.isEliminated || playerToPlay.hasPassed) {
                  nextIndex = (nextIndex + 1) % prev.turnOrder.length;
                  loop++;
              } else if (playerToPlay.status.turnLost) {
-                 // RESOLVE TURN LOST PENALTY
-                 ps = ps.map(p => p.id === playerToPlay.id ? { ...p, status: { ...p.status, turnLost: false }, hasPassed: true } : p);
-                 logs.push({ id: Date.now().toString(), turn: prev.round, text: `${playerToPlay.name} serves Penalty: Turn Lost.`, type: 'alert' });
-                 
-                 nextIndex = (nextIndex + 1) % prev.turnOrder.length;
-                 loop++;
+                 const ps = prev.players.map(p => p.id === playerToPlay.id ? { ...p, status: { ...p.status, turnLost: false }, hasPassed: true } : p);
+                 const logs = [...prev.logs, { id: Date.now().toString(), turn: prev.round, text: `${playerToPlay.name} serves Penalty: Turn Lost.`, type: 'alert' as const }];
+                 return { ...prev, players: ps, logs, turnOrderIndex: (nextIndex + 1) % prev.turnOrder.length, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
              } else {
                  break;
              }
         }
 
-        return { ...prev, players: ps, logs, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
+        // --- SUNSET RULE: LAST STAND ---
+        // If the next player found is the SAME as the current player (meaning everyone else passed)
+        // AND there are multiple active players in the game...
+        // ... then this player has just finished their "Last Stand" turn (or is about to take it if logic differs).
+        // Since advanceTurn is called AFTER an action, if we loop back to the same player, it means they just acted while everyone else was passed.
+        // We force them to pass now to prevent infinite turns.
+        const nextPlayerId = prev.turnOrder[nextIndex];
+        const currentId = prev.turnOrder[prev.turnOrderIndex];
+        
+        if (activePlayers.length > 1 && nextPlayerId === currentId && !prev.players[currentId].hasPassed) {
+             const ps = prev.players.map(p => p.id === currentId ? { ...p, hasPassed: true } : p);
+             const logs = [...prev.logs, { id: `sunset-${Date.now()}`, turn: prev.round, text: "Sunset Rule: All rivals passed. Round ends.", type: 'phase' as const }];
+             return { 
+                 ...prev, 
+                 players: ps, 
+                 logs, 
+                 turnTrigger: prev.turnTrigger + 1, 
+                 uiState: { ...prev.uiState, isProcessing: false } 
+             };
+        }
+
+        return { ...prev, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
     });
   };
 
@@ -1274,7 +1293,7 @@ const App: React.FC = () => {
   };
 
   const handleHumanAction = (action: string, payload?: any) => {
-      if (gameState.uiState.isProcessing) return; // BLOCK ACTIONS IF BUSY
+      if (gameState.uiState.isProcessing) return; 
 
       const p = gameState.players[0];
       if (p.isEliminated) return;
@@ -1295,6 +1314,7 @@ const App: React.FC = () => {
                        turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false }, passOrder: newPassOrder
                    };
                } else {
+                   // Manual advance logic for pass since advanceTurn handles active players
                    let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
                    let attempts = 0;
                    while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
@@ -1311,25 +1331,32 @@ const App: React.FC = () => {
            return;
       }
       
+      // FATIGUE CALCULATION: +1 Cost per action taken this round
+      const fatigue = p.actionsTaken > 0 ? 1 : 0;
+
       if (action === 'TRADE_BANK') {
           const isFree = p.status.freeTrades > 0 || p.activeRelicPower === 'TRADE_BARON'; 
-          if (p.status.freeTrades > 0 || p.resources[Resource.Grain] >= 2) {
+          const tradeCost = 2 + fatigue; // Base 2 + Fatigue
+
+          if (isFree || p.resources[Resource.Grain] >= tradeCost) {
                setGameState(prev => {
                    const currentP = prev.players[0];
                    let newRes = { ...currentP.resources };
                    let newStatus = { ...currentP.status };
                    const usedFree = currentP.status.freeTrades > 0;
 
-                   if (usedFree) { newStatus.freeTrades--; } else { newRes[Resource.Grain] -= 2; }
+                   if (usedFree) { newStatus.freeTrades--; } 
+                   else { newRes[Resource.Grain] -= tradeCost; }
+                   
                    newRes[Resource.Gold] += 1;
                    
                    const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, resources: newRes, status: newStatus, actionsTaken: pl.actionsTaken + 1 } : pl);
-                   const txt = usedFree ? "Used Free Trade: +1 Gold." : "Traded 2 Grain for 1 Gold.";
+                   const txt = usedFree ? "Used Free Trade: +1 Gold." : `Traded ${tradeCost} Grain for 1 Gold.`;
 
                    return { ...prev, players: ps, logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: txt, type:'info', actorId: 0}] };
                });
                advanceTurn();
-          } else addLog("Need 2 Grain.", 'info');
+          } else addLog(`Need ${tradeCost} Grain.`, 'info');
           return;
       }
 
@@ -1365,7 +1392,6 @@ const App: React.FC = () => {
       }
 
       if (action === 'EXPLORE_RUIN') {
-          // Fallback if player owns ruin
           const myRuins = (Object.values(gameState.map) as HexData[]).filter((h) => h.ownerId === 0 && h.type === TileType.Ruins);
           if (myRuins.length > 0) {
                const targetRuin = myRuins[0];
@@ -1375,7 +1401,7 @@ const App: React.FC = () => {
                setGameState(prev => {
                     const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, actionsTaken: pl.actionsTaken + 1 } : pl);
                     const nm = { ...prev.map };
-                    if (nm[targetRuin.id]) { nm[targetRuin.id] = { ...nm[targetRuin.id], type: TileType.Plains, publicType: TileType.Plains }; }
+                    if (nm[targetRuin.id]) { nm[targetRuin.id] = { ...nm[targetRuin.id], type: TileType.Plains, publicType: TileType.Plains, isRevealed: true }; }
                     
                     const logs = [...prev.logs, { 
                         id: `ruin-collapse-${Date.now()}`, 
@@ -1405,17 +1431,19 @@ const App: React.FC = () => {
       if (action === 'BUILD_FORTIFY') {
           const isRelicFree = p.activeRelicPower === 'FREE_FORTIFY' && p.actionsTaken === 0;
           const isFree = p.status.freeFortify || isRelicFree;
+          const fortifyCost = 2 + fatigue; 
+
           if (isFree) { valid = true; } 
-          else { valid = p.resources[Resource.Stone] >= 2; if (!valid) addLog("Need 2 Stone.", 'info'); }
+          else { valid = p.resources[Resource.Stone] >= fortifyCost; if (!valid) addLog(`Need ${fortifyCost} Stone.`, 'info'); }
       }
       else if (action === 'WARRIOR_ATTACK') {
-          const attackCost = p.actionsTaken === 0 ? 1 : 2;
+          const attackCost = 1 + fatigue;
           if (p.status.canAttack) { valid = p.resources[Resource.Grain] >= attackCost; if (!valid) addLog(`Commander, we need ${attackCost} Grain to supply the troops!`, 'info'); }
       }
       else if (action === 'EXPLORE_CLAIM') {
-          const cost = 1; 
+          const cost = 1 + fatigue; 
           valid = p.resources[Resource.Grain] >= cost;
-          if (!valid) addLog(`Exploration now costs 1 Grain.`, 'info');
+          if (!valid) addLog(`Exploration costs ${cost} Grain (Fatigue +1).`, 'info');
       }
       else if (action === 'ACTIVATE_RELIC') valid = true;
 
@@ -1446,6 +1474,9 @@ const App: React.FC = () => {
       const myTiles = (Object.values(gameState.map) as HexData[]).filter((h) => h.ownerId === 0);
       const isAdj = myTiles.some(h => isAdjacent(h, hex));
       
+      const p = gameState.players[0];
+      const fatigue = p.actionsTaken > 0 ? 1 : 0;
+
       if (actionType === 'ACTIVATE') {
           if (hex.ownerId === 0 && hex.type === TileType.RelicSite && hex.publicType !== TileType.RelicSite) {
               setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isProcessing: true } }));
@@ -1471,11 +1502,11 @@ const App: React.FC = () => {
       }
 
       if ((actionType === 'CLAIM' || actionType === 'EXPLORE') && hex.ownerId === null && isAdj) {
-           // SPECIAL CASE: RUINS SCAVENGE ON ENTRY
+           // RUINS CHECK
            if (hex.type === TileType.Ruins) {
-               const cost = 1;
+               const cost = 1 + fatigue;
                if (gameState.players[0].resources.Grain < cost) {
-                   addLog("Insufficient Grain to explore Ruins.", 'alert');
+                   addLog(`Insufficient Grain (${cost}) to explore Ruins.`, 'alert');
                    return;
                }
 
@@ -1528,8 +1559,9 @@ const App: React.FC = () => {
                
                const isRelicFree = player.activeRelicPower === 'FREE_FORTIFY' && player.actionsTaken === 0;
                const isFree = player.status.freeFortify || isRelicFree;
-               
-               if (!isFree) { newRes[Resource.Stone] -= 2; }
+               const cost = 2 + fatigue;
+
+               if (!isFree) { newRes[Resource.Stone] -= cost; }
 
                const ps = prev.players.map(p => p.id === 0 ? {...p, resources: newRes, actionsTaken: p.actionsTaken + 1} : p);
                const nm = { ...prev.map };
@@ -1563,7 +1595,7 @@ const App: React.FC = () => {
            
            setGameState(prev => {
                let ps = prev.players.map(p => p.id === 0 ? {...p, actionsTaken: p.actionsTaken + 1 } : p);
-               const attackCost = prev.players[0].actionsTaken === 0 ? 1 : 2;
+               const attackCost = 1 + fatigue;
                ps[0].resources[Resource.Grain] -= attackCost;
                ps[0] = updateMaxResources(ps[0]);
 
@@ -1755,7 +1787,9 @@ const App: React.FC = () => {
           map[pendingHexId] = { ...map[pendingHexId], ownerId: 0, isRevealed: true, publicType: declaredType };
           players[myPlayerIndex] = updatePlayerStat(players[myPlayerIndex], 'tilesRevealed', 1);
           
-          const cost = 1; 
+          const fatigue = players[myPlayerIndex].actionsTaken > 0 ? 1 : 0;
+          const cost = 1 + fatigue; 
+          
           if (cost > 0) { players[myPlayerIndex].resources[Resource.Grain] -= cost; }
           players[myPlayerIndex].actionsTaken++;
 
@@ -1940,6 +1974,11 @@ const App: React.FC = () => {
        </div>
   );
 
+  const activeId = gameState.turnOrder[gameState.turnOrderIndex];
+  const activePlayer = gameState.players[activeId];
+  const activePlayersList = gameState.players.filter(p => !p.isEliminated && !p.hasPassed);
+  const isLastStand = activePlayersList.length === 1 && activePlayersList[0].id === 0 && gameState.players.filter(p => !p.isEliminated).length > 1;
+
   if (showSplash) return <SplashScreen onStart={handleSplashStart} onOpenSim={() => setShowSim(true)} onOpenStrategyLab={() => setShowStrategyLab(true)} />;
   if (showSim) return <SimulationOverlay onClose={() => setShowSim(false)} />;
   if (showStrategyLab) return <SimulationRunner onClose={() => setShowStrategyLab(false)} />;
@@ -2046,7 +2085,6 @@ const App: React.FC = () => {
 
   const isMyTurn = gameState.phase === Phase.Action && gameState.turnOrder[gameState.turnOrderIndex] === 0 && !isHumanEliminated;
   const isActionPhaseDone = gameState.phase === Phase.Events;
-  const activeId = gameState.turnOrder[gameState.turnOrderIndex];
   const activePlayerName = gameState.players[activeId]?.name;
 
   return (
@@ -2098,7 +2136,7 @@ const App: React.FC = () => {
                {renderTileTooltip()}
 
                {/* Center the grid properly */}
-               <div className="flex-1 relative flex items-center justify-center overflow-hidden pt-16 pb-48">
+               <div className="flex-1 relative flex items-center justify-center overflow-hidden pt-4 pb-0">
                    <HexGrid 
                        map={gameState.map} 
                        players={gameState.players} 
@@ -2123,6 +2161,7 @@ const App: React.FC = () => {
                        onEndPhase={handlePhaseTransition}
                        map={gameState.map}
                        isEliminated={gameState.players[0].isEliminated}
+                       isLastStand={isLastStand}
                        uiState={gameState.uiState}
                    />
                </div>

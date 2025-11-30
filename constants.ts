@@ -1,5 +1,6 @@
 
-import { Resource, TileType, CitizenType, FactionInfo, EventCard, SecretObjective, HexData } from './types';
+
+import { Resource, TileType, CitizenType, FactionInfo, EventCard, SecretObjective, HexData, TraitType } from './types';
 
 export const TOTAL_ROUNDS = 5;
 export const HEX_SIZE = 45;
@@ -83,7 +84,7 @@ export const OBJECTIVES_DECK: SecretObjective[] = [
     { id: 'o13', name: "Relic Cartographer", description: "Reveal 2 Relic Sites", vp: 3, condition: (p) => p.stats.relicSitesRevealed >= 2, progress: (p) => `${p.stats.relicSitesRevealed}/2` }
 ];
 
-export const FACTION_TRAITS: Record<string, string[]> = {
+export const FACTION_TRAITS: Record<string, TraitType[]> = {
     "Terran Republic": ["Expansionist", "Cautious"],
     "Mars Confederacy": ["Aggressive", "Vengeful"],
     "Venusian Syndicate": ["Greedy", "Treacherous"],
