@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, BookOpen, Trophy, Map, Users, Target, Zap, Crown, Settings, Box, Sword, Info, Scroll, ShieldAlert } from 'lucide-react';
+import { X, BookOpen, Trophy, Map, Users, Target, Zap, Crown, Settings, Box, Sword, Info, Scroll, ShieldAlert, HelpCircle } from 'lucide-react';
 
 interface HelpModalProps {
   isOpen: boolean;
@@ -195,6 +195,47 @@ const GUIDE_DATA: Category[] = [
             { label: "Relic Tokens", value: "2 VP per Token" },
             { label: "Secret Directives", value: "Variable VP (Check Sidebar)" },
             { label: "Public Imperatives", value: "Variable VP (Revealed Rounds 2-4)" }
+          ]
+        }
+      ]
+    },
+    {
+      id: "faq",
+      title: "FAQ & Errata",
+      icon: <HelpCircle size={18} />,
+      sections: [
+        {
+          heading: "Q: What is the difference between a Ruin and a Relic Site?",
+          content: "A: Ruins are temporary. When you enter them, you immediately draw a card (Scavenge) and the tile becomes a Plains. You do not keep the \"Ruin\" tile. Relic Sites are permanent territory. You claim them like any other land. They produce Relic resources and, if revealed, upgrade your future Event Cards."
+        },
+        {
+          heading: "Q: If I claim a Relic Site, do I draw a card immediately?",
+          content: "A: No. Relic Sites are territory. You only draw cards during the Events Phase (Phase V). Faking a Relic Site is a safe bluff because you don't have to perform any special action (like drawing a card) when you claim it."
+        },
+        {
+          heading: "Q: What happens if we run out of Resource Tokens?",
+          content: "A: Unlimited Components. Use a substitute (coin, dice). Your wealth is not capped by the limit of the physical components."
+        },
+        {
+          heading: "Q: If I end with 5 Gold, do I get the Treasurer VP?",
+          content: "A: No. You need 6 Gold or more. 5 Gold scores 0 VP for that specific objective."
+        },
+        {
+          heading: "Advanced Strategy: The Art of Bluffing",
+          content: [
+            "Q: Why would I fake having a Relic?",
+            "• To Hide Economy: If you claim a Relic but the tile is actually Gold, you secretly collect Gold while opponents think you are poor.",
+            "• To Deter Attacks: Opponents hunting for Gold may ignore a 'Relic Site.' Conversely, opponents hunting for Relics might walk into a trap.",
+            "• To Feint Strength: Controlling Relics implies you might have powerful Event Card abilities. Faking this might make enemies hesitate to attack you.",
+            " ",
+            "Q: Is it suspicious if I claim a Relic but don't pick up an Event Card immediately?",
+            "• A: NO. This is the key to the bluff.",
+            "• Ruins: You must pick up a card immediately.",
+            "• Relic Sites: You do NOT pick up a card when claiming. You only use the power later.",
+            "• The Bluff: Because there is no 'card drawing' action required, faking a Relic looks exactly the same physically as claiming a real one. There is no 'tell'.",
+            " ",
+            "Q: Can I show my cards or treasury to prove I'm telling the truth?",
+            "• A: No. You may say anything you want ('I really have 10 Gold!'), but you may never reveal hidden components to prove it. The only way to verify truth is through game mechanics like Espionage or the End Game Audit."
           ]
         }
       ]
