@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Phase, Player, CitizenType, HexData, TileType, Resource } from '../types';
 import { CITIZEN_INFO } from '../constants';
-import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw, Amphora } from 'lucide-react';
+import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw, Amphora, AlertTriangle } from 'lucide-react';
 
 interface ActionPanelProps {
   phase: Phase;
@@ -15,6 +15,7 @@ interface ActionPanelProps {
   map?: Record<string, HexData>; 
   isActionPhaseDone?: boolean;
   isEliminated?: boolean;
+  isLastStand?: boolean; // NEW: Sunset Rule Indicator
   uiState: {
     isSelectingTile: boolean;
     isDeclaring: boolean;
@@ -22,14 +23,11 @@ interface ActionPanelProps {
   };
 }
 
-const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, activePlayerName, onSelectCitizen, onAction, onEndPhase, map, isActionPhaseDone, isEliminated, uiState }) => {
+const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, activePlayerName, onSelectCitizen, onAction, onEndPhase, map, isActionPhaseDone, isEliminated, isLastStand, uiState }) => {
   
   const [isReselecting, setIsReselecting] = useState(false);
   const hasRuins = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.Ruins) : false;
   const hasHiddenRelic = map ? Object.values(map).some((h: HexData) => h.ownerId === player.id && h.type === TileType.RelicSite && h.publicType !== TileType.RelicSite) : false;
-
-  // REMOVED: Top-level blocking if (isEliminated) return ...
-  // Instead, we handle isEliminated inside each phase to allow "Next" buttons.
 
   const renderCitizenSelection = (title: string, btnLabel: string, onConfirm: () => void) => (
       <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] p-3 shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0 animate-in slide-in-from-bottom duration-300">
@@ -140,26 +138,29 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
       }
 
       const role = player.selectedCitizen;
+      const fatigue = player.actionsTaken > 0 ? 1 : 0; // FATIGUE: +1 Cost to ALL actions after the first
       
-      // Calculate costs or conditions
-      const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= 2;
+      // -- DYNAMIC COST CALCULATIONS --
       
-      // Fortify: Free if (Relic && FirstAction) OR Status.FreeFortify. Otherwise cost 2 Stone.
+      // Trade: Base 2 Grain -> 1 Gold. Fatigue: 3 Grain.
+      const tradeCost = 2 + fatigue;
+      const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= tradeCost;
+      
+      // Fortify: Base 2 Stone. Fatigue: 3 Stone.
+      const fortifyCost = 2 + fatigue;
       const isRelicFortifyFree = player.activeRelicPower === 'FREE_FORTIFY' && player.actionsTaken === 0;
-      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= 2);
+      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= fortifyCost);
       
-      // Expand: Flat cost 1 Grain
-      const expandCost = 1;
+      // Expand: Base 1 Grain. Fatigue: 2 Grain.
+      const expandCost = 1 + fatigue;
       const canExpand = player.resources.Grain >= expandCost;
       
-      // Attack: Cost 1 Grain (First), 2 Grain (Subsequent)
-      const attackCost = player.actionsTaken === 0 ? 1 : 2;
+      // Attack: Base 1 Grain. Fatigue: 2 Grain.
+      const attackCost = 1 + fatigue;
       const canAttack = player.status.canAttack && player.resources.Grain >= attackCost;
 
-      // Determine Role Color
       const roleColor = role === CitizenType.Warrior ? '#ef4444' : role === CitizenType.Builder ? '#22c55e' : role === CitizenType.Merchant ? '#eab308' : '#3b82f6';
       
-      // Relic Power Badge Logic
       const getPowerLabel = () => {
           switch(player.activeRelicPower) {
               case 'PASSIVE_INCOME': return "Crown of Prosperity";
@@ -183,7 +184,11 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                   </div>
                   <div className="flex items-center gap-2">
                        {isMyTurn ? (
-                           <span className="animate-pulse">YOUR TURN TO ACT</span>
+                           isLastStand ? (
+                               <span className="animate-pulse text-red-600 font-black flex items-center gap-1"><AlertTriangle size={14}/> LAST STAND: FINAL ACTION</span>
+                           ) : (
+                               <span className="animate-pulse">YOUR TURN TO ACT</span>
+                           )
                        ) : (
                            <span>Turn: <span className="text-white">{activePlayerName || "Opponent"}</span></span>
                        )}
@@ -203,7 +208,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                   <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-bold uppercase tracking-widest" style={{color: roleColor}}>Active Council: <span className="text-white">{role}</span></h3>
                       <div className="flex gap-2">
-                         {/* Emergency Market Button - OPEN MODAL */}
                          <button
                             onClick={() => onAction('OPEN_MARKET')}
                             disabled={!isMyTurn}
@@ -227,7 +231,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                   {/* MAIN ACTIONS ROW */}
                   <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide justify-center md:justify-start">
                       
-                      {/* ROLE SPECIFIC ACTION */}
                       {role === CitizenType.Merchant && (
                           <button 
                             onClick={() => onAction('TRADE_BANK')}
@@ -237,7 +240,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Scale size={20} className="text-amber-400 mb-1"/>
                              <span className="text-[10px] font-bold text-amber-100 uppercase">Trade</span>
                              <span className="text-[8px] text-amber-200/60">
-                                 {player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' ? "Free (Relic)" : "2 Grain -> 1 Gold"}
+                                 {player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' ? "Free (Relic)" : `${tradeCost} Grain -> 1 Gold`}
                              </span>
                           </button>
                       )}
@@ -251,7 +254,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Hammer size={20} className="text-green-400 mb-1"/>
                              <span className="text-[10px] font-bold text-green-100 uppercase">Fortify</span>
                              <span className="text-[8px] text-green-200/60">
-                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : "2 Stone"}
+                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : `${fortifyCost} Stone`}
                              </span>
                           </button>
                       )}
@@ -279,7 +282,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                             >
                                 <Compass size={20} className="text-blue-400 mb-1"/>
                                 <span className="text-[10px] font-bold text-blue-100 uppercase">Expand</span>
-                                <span className="text-[8px] text-blue-200/60">Cost: 1 Grain</span>
+                                <span className="text-[8px] text-blue-200/60">Cost: {expandCost} Grain</span>
                             </button>
                             <button 
                                 onClick={() => onAction('EXPLORE_RUIN')}

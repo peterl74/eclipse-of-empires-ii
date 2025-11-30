@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, BookOpen, Trophy, Map, Users, Target, Zap, Crown, Settings, Box, Sword, Info, Scroll } from 'lucide-react';
+import { X, BookOpen, Trophy, Map, Users, Target, Zap, Crown, Settings, Box, Sword, Info, Scroll, ShieldAlert } from 'lucide-react';
 
 interface HelpModalProps {
   isOpen: boolean;
@@ -32,24 +32,76 @@ const GUIDE_DATA: Category[] = [
             "The Action Phase uses a 'Cycle until Pass' system.",
             "Turn Order: Players act in sequence (1 → 2 → 3 → 4 → 1...) indefinitely.",
             "Ending the Round: The phase only ends when ALL players have passed.",
-            "Resource Cap: Actions are limited by Resources, not slots. If you run out of Grain/Gold, you must Pass.",
-            "Initiative: The 'First Player' token rotates clockwise at the start of every new Eclipse."
+            "Resource Cap: Actions are limited by Resources. If you run out of Grain/Gold, you must Pass.",
+            "Initiative (Strategic Passing): The Turn Order for the NEXT Eclipse is determined by the order in which players Pass. The first player to Pass becomes the First Player next round."
           ]
         },
         {
-          heading: "Action Costs & Fatigue",
-          tableData: [
-            { label: "Warrior Attack", value: "Costs 1 Grain per attack. No Grain = No Fighting." },
-            { label: "Explorer Expand", value: "1st Expansion is Free. Subsequent expansions in the same round cost 1 Grain." },
-            { label: "Builder Fortify", value: "Costs 2 Stone. (Unless you have the 'Free Fortify' Relic Power)." }
-          ]
-        },
-        {
-          heading: "Bluffing & Challenging",
+          heading: "Fatigue System (New)",
           content: [
-            "Private Truth: You see the true type of your tiles.",
-            "Public Lie: You declare a tile type to rivals.",
-            "HOW TO CHALLENGE: There is no 'Call Bluff' button. You challenge a claim by ATTACKING the territory. If you conquer it, the true nature is revealed to all."
+            "Taking multiple actions in a single round becomes exhausting.",
+            "Action 1: Standard Cost.",
+            "Action 2+: Standard Cost + 1 Resource.",
+            "Action 3+: Standard Cost + 1 Resource (Fatigue caps at +1 currently).",
+            "This applies to ALL actions (Attacking, Expanding, Trading, Fortifying)."
+          ]
+        },
+        {
+          heading: "The Sunset Rule (Last Stand)",
+          content: "If ALL your rivals have Passed, you are granted exactly ONE final 'Last Stand' action. After this action, the Eclipse ends automatically, regardless of your remaining resources."
+        }
+      ]
+    },
+    {
+      id: "bluffing",
+      title: "Bluffing & Challenges",
+      icon: <ShieldAlert size={18} />,
+      sections: [
+        {
+          heading: "Declarations",
+          content: "When you Expand, you must publicly Declare what type of land you found. You may lie (e.g., claim a Goldmine is Plains). Private Truth is visible only to you."
+        },
+        {
+          heading: "Interception (Challenging)",
+          content: "When a rival expands, a 'Challenge Alert' appears for 5 seconds. You may interrupt their turn to Challenge their claim.",
+          tableData: [
+            { label: "Trust", value: "The rival keeps the tile. If they lied, they get away with it." },
+            { label: "Challenge", value: "The tile is revealed immediately." }
+          ]
+        },
+        {
+          heading: "Outcomes & Penalties",
+          content: "Penalties depend on the selected Ruleset (Standard vs Casual).",
+          tableData: [
+            { label: "Caught Lying", value: "The Bluffer loses the tile and Reputation/VP." },
+            { label: "False Accusation (Standard)", value: "You receive a 'Turn Lost' penalty and must Pass immediately next turn." },
+            { label: "False Accusation (Casual)", value: "You pay a fine of 2 Gold to the accused." }
+          ]
+        },
+        {
+          heading: "Strategic Warning (Standard Mode)",
+          content: "Strategic Note: This means a failed challenge is extremely risky if you haven't taken your main action for the round yet, as the 'Turn Lost' penalty effectively ends your round instantly."
+        }
+      ]
+    },
+    {
+      id: "modes",
+      title: "Game Modes & AI",
+      icon: <Users size={18} />,
+      sections: [
+        {
+          heading: "AI Psychology (Challenge Mode)",
+          content: [
+            "Rivals track 'Fear' (your military capability) and 'Suspicion' (your intent).",
+            "Coalitions: If you lead by too much VP, rivals may form an alliance and focus attacks on you.",
+            "Paranoia: High suspicion makes AI more likely to Challenge your bluffs."
+          ]
+        },
+        {
+          heading: "Rulesets",
+          tableData: [
+            { label: "Standard", value: "Hardcore. False Accusations = Turn Lost. Recommended for strategy veterans." },
+            { label: "Casual", value: "Forgiving. False Accusations = Gold Fine. Recommended for learning." }
           ]
         }
       ]
@@ -57,45 +109,38 @@ const GUIDE_DATA: Category[] = [
     {
       id: "classes",
       title: "The Council (Classes)",
-      icon: <Users size={18} />,
+      icon: <Crown size={18} />,
       sections: [
         {
           heading: "Citizen Roles",
-          content: "Chosen secretly at the start of Phase II. Your role defines your primary action for the round.",
+          content: "Chosen secretly at the start of Phase II. Costs increase with Fatigue.",
           tableData: [
-            { label: "Warrior", value: "Action: Attack. Effect: Conquer tile & Loot 1 Resource on win. Cost: 1 Grain." },
-            { label: "Builder", value: "Action: Fortify. Effect: +1 Defense AND +1 Resource Production. Cost: 2 Stone." },
-            { label: "Merchant", value: "Action: Trade. Effect: Exchange 2 Grain -> 1 Gold (Better ratio than Market)." },
-            { label: "Explorer", value: "Action: Expand. Effect: Claim Neutral/Fog tiles. Cost: 1 Grain (Flat)." }
+            { label: "Warrior", value: "Action: Attack. Loot 1 Resource on win. Base Cost: 1 Grain." },
+            { label: "Builder", value: "Action: Fortify. +1 Defense/Production. Base Cost: 2 Stone." },
+            { label: "Merchant", value: "Action: Trade. 2 Grain -> 1 Gold. Base Cost: 2 Grain." },
+            { label: "Explorer", value: "Action: Expand. Claim Neutral/Fog tiles. Base Cost: 1 Grain." }
           ]
         }
       ]
     },
     {
       id: "relics",
-      title: "Relic Powers (Option B)",
+      title: "Relic Powers",
       icon: <Zap size={18} />,
       sections: [
         {
-          heading: "Engine Building Rules",
-          content: [
-            "Relics now grant Permanent Powers instead of one-time loot.",
-            "The 'One Crown' Rule: You may only hold ONE active power at a time. Finding a new Relic forces a swap choice."
-          ]
+          heading: "The 'One Crown' Rule",
+          content: "You may only hold ONE active Relic Power. Finding a new one replaces the old."
         },
         {
           heading: "Power List",
           tableData: [
-            { label: "Passive Income", value: "Auto-gain +1 Grain & +1 Gold every round start." },
-            { label: "Free Fortify", value: "Your first Fortify action each round costs 0 resources." },
-            { label: "Warlord", value: "Permanent +1 Combat Strength (Stacks with Warrior)." },
-            { label: "Trade Baron", value: "Start every round with 1 Free Trade action." },
-            { label: "Double Time", value: "Pay 2 Gold to take 2 Actions immediately." }
+            { label: "Crown of Prosperity", value: "Passive Income: +1 Grain & +1 Gold every round." },
+            { label: "Mason's Hammer", value: "Free Fortify: First Fortify each round is free." },
+            { label: "Warlord's Banner", value: "+1 Combat Strength (Permanent)." },
+            { label: "Merchant's Seal", value: "Free Trade: First Trade each round is free." },
+            { label: "Legion's Stride", value: "Double Time: Pay 2 Gold to take 2 Actions." }
           ]
-        },
-        {
-          heading: "Probability",
-          content: "Map contains approx 2 Relic Sites total. Probability of finding one is ~4% per tile. 50% of players will likely not get a Relic."
         }
       ]
     },
@@ -115,58 +160,24 @@ const GUIDE_DATA: Category[] = [
           heading: "Outcomes",
           content: [
             "Win: Defender loses tile. Fortification destroyed. Attacker occupies and LOOTS 1 Resource.",
-            "Loss/Tie: Nothing changes. Attacker still pays 1 Grain cost."
+            "Loss/Tie: Nothing changes. Attacker still pays cost."
           ]
         }
       ]
     },
     {
       id: "map",
-      title: "Map Data",
+      title: "Map & Events",
       icon: <Map size={18} />,
       sections: [
         {
-          heading: "Tile Distributions (4 Players)",
+          heading: "Tile Types",
           tableData: [
-            { label: "Plains (Grain)", value: "~32% (Primary Food Source)" },
-            { label: "Mountains (Stone)", value: "~20% (Build Material)" },
-            { label: "Goldmines (Gold)", value: "~8% (1 VP + Currency)" },
-            { label: "Ruins (Loot)", value: "~8% (One-time Scavenge)" },
-            { label: "Relic Sites", value: "~4% (2 VP + Power)" },
-            { label: "Capital", value: "1 per player (Produces 1 of each)" }
-          ]
-        }
-      ]
-    },
-    {
-      id: "events",
-      title: "Event Database",
-      icon: <BookOpen size={18} />,
-      sections: [
-        {
-          heading: "Relic Power Mappings",
-          content: "These cards grant a Permanent Power if found via a Relic Site.",
-          tableData: [
-            { label: "Supply Drop", value: "Power: Passive Income" },
-            { label: "Resource Boom", value: "Power: Passive Income" },
-            { label: "Blessing of Prosperity", value: "Power: Passive Income" },
-            { label: "Earthquake", value: "Power: Free Fortify" },
-            { label: "Fog of War", value: "Power: Free Fortify" },
-            { label: "Sudden Reinforcements", value: "Power: Warlord" },
-            { label: "Diplomatic Envoys", value: "Power: Warlord" },
-            { label: "Merchant Windfall", value: "Power: Trade Baron" },
-            { label: "Forced March", value: "Power: Double Time" }
-          ]
-        },
-        {
-          heading: "Standard Events",
-          content: "These cards have instant effects when drawn from the Global Event Deck.",
-          tableData: [
-            { label: "Sabotage", value: "Opponent loses resource." },
-            { label: "Bandit Raid", value: "Steal 1 resource." },
-            { label: "Natural Disaster", value: "Destroy 1 tile." },
-            { label: "Collapsed Mine", value: "Mines produce 0." },
-            { label: "Ancient Knowledge", value: "Draw extra event." }
+            { label: "Plains", value: "Produces Grain (Food/Fuel)" },
+            { label: "Mountains", value: "Produces Stone (Building)" },
+            { label: "Goldmine", value: "Produces Gold (Wildcard/VP)" },
+            { label: "Ruins", value: "One-time scavenge for Event Cards." },
+            { label: "Relic Sites", value: "Grants Relic Token + Power. (Rare)" }
           ]
         }
       ]
@@ -177,54 +188,118 @@ const GUIDE_DATA: Category[] = [
       icon: <Target size={18} />,
       sections: [
         {
-          heading: "Economic Goals",
+          heading: "Scoring",
           tableData: [
-            { label: "Keeper of the Harvest", value: "Control 3 Plains (3 VP)" },
-            { label: "Master of the Forge", value: "Collect 8 Stone (2 VP)" },
-            { label: "Merchant Prince", value: "Hold 12 Resources at once (3 VP)" },
-            { label: "Treasurer of Empires", value: "End with 6 Gold (2 VP)" },
-            { label: "Golden Triad", value: "End with 1 Grain, 1 Stone, 1 Gold, 1 Relic (2 VP)" }
-          ]
-        },
-        {
-          heading: "Military Goals",
-          tableData: [
-            { label: "Warlord's Dominion", value: "Win 3 Battles (3 VP)" },
-            { label: "Reaver of Realms", value: "Attack 2 different players (4 VP)" },
-            { label: "Shadow Empire", value: "Lose 0 tiles after Round 3 (4 VP)" },
-            { label: "Silent Pactkeeper", value: "Do not attack anyone (3 VP)" }
-          ]
-        },
-        {
-          heading: "Exploration Goals",
-          tableData: [
-            { label: "Architect of Ages", value: "Build 3 Forts (3 VP)" },
-            { label: "Pathfinder's Legacy", value: "Reveal 5 tiles (3 VP)" },
-            { label: "Border Baron", value: "Control 3 tiles in a line (3 VP)" },
-            { label: "Tri-Lord", value: "Control 1 Plain, 1 Mountain, 1 Goldmine, 1 Relic (4 VP)" }
-          ]
-        },
-        {
-          heading: "Relic Goals",
-          tableData: [
-            { label: "Relic Hoarder", value: "End with 3 Relic Tokens (4 VP)" },
-            { label: "Prophet of the Eclipse", value: "Trigger a Relic Event (2 VP)" },
-            { label: "Relic Cartographer", value: "Reveal 2 Relic Sites (3 VP)" }
+            { label: "Territory", value: "1 VP per Tile (Relic Sites = 2 VP)" },
+            { label: "Fortifications", value: "+1 VP per Fort" },
+            { label: "Relic Tokens", value: "2 VP per Token" },
+            { label: "Secret Directives", value: "Variable VP (Check Sidebar)" },
+            { label: "Public Imperatives", value: "Variable VP (Revealed Rounds 2-4)" }
           ]
         }
       ]
     },
     {
-      id: "components",
-      title: "Inventory",
-      icon: <Box size={18} />,
+      id: "log",
+      title: "The Strategos' Log",
+      icon: <Scroll size={18} />,
       sections: [
         {
-          heading: "Digital Assets",
-          tableData: [
-            { label: "Game Board", value: "7x7 Hex Grid (49 Tiles)" },
-            { label: "Faction Decks", value: "4 Sets of Citizen Cards" },
-            { label: "Cards", value: "20 Events, 16 Secret Objectives, Public Objective Deck" }
+          heading: "Entry I: Arrival in the Mist (Setup)",
+          content: "The Twin Suns aligned at dawn. As the prophecy foretold, the Great Eclipse fell across the land, shrouding the borders of the known world in mist. Our maps are useless now. I have ordered the establishment of our Capital on the northern ridge. The men believe we are isolated, but I know the truth of this land: trust is a currency more volatile than gold. We must paint this map in our colors before the light returns."
+        },
+        {
+          heading: "Imperial Directive: The World",
+          content: [
+            "The Map: The world is built from a grid of face-down hexagonal tiles (5x5 or 7x7) representing the Fog of War.",
+            "The Capital: Players draft a faction and place 1 Control Marker on any face-down tile on the map's outer edge to begin their empire.",
+            "The Treasury: You begin with a secret stash of 2 Grain, 1 Stone, and 1 Gold hidden in your Imperial Treasury Box.",
+            "The Objective: The goal is to have the most Victory Points (VP) after the 5th Eclipse."
+          ]
+        },
+        {
+          heading: "Entry II: The First Lie (Fog of War & Intel)",
+          content: "I have inspected our new territory personally. It is a rocky wasteland, rich in Stone but poor in food. However, if the Verdant Keepers knew we were starving, they would attack immediately. So, I have ordered the banners raised claiming this land is fertile farmland. Let them think we are farmers. We shall build walls while they sleep."
+        },
+        {
+          heading: "Imperial Directive: Deception & Truth",
+          content: [
+            "Private Intel: You may privately peek at any tile you stand on or control. You know the truth; opponents only know what you tell them.",
+            "The Declaration: When you claim a tile, you must place a Resource Token on top of it. This is your \"Public Declaration\".",
+            "The Lie: You are allowed to lie. For example, you may place a Gold token on a Plains tile.",
+            "The Capital Exception: You must tell the truth about your starting Capital tile."
+          ]
+        },
+        {
+          heading: "Entry III: The Harvest (Income Phase)",
+          content: "The Eclipse darkens the sky, marking the start of our cycle. We tallied our resources in the dark, away from prying eyes. As expected, the \"farmland\" produced nothing, but our stone quarries are full. We took what the land truly gave us, not what the banners claimed."
+        },
+        {
+          heading: "Imperial Directive: Phase II (Income)",
+          content: [
+            "Secret Income: Players simultaneously take resources from the supply corresponding to the TRUE type of their tiles, not the tokens on top.",
+            "Production Base: Gain 1 Resource per tile matching its true type (Grain/Stone/Gold/Relic).",
+            "Fortified: Gain +1 extra Resource if the tile has a Fortification.",
+            "Capital: Produces 1 Grain, 1 Stone, and 1 Gold.",
+            "The Ledger: Use your Imperial Ledger to track income without lifting tiles, which would reveal your secrets."
+          ]
+        },
+        {
+          heading: "Entry IV: The Council (Role Selection)",
+          content: "The Senate demanded we focus on trade to fix our grain shortage, but I overruled them. We need stone for the walls first. I sent for the Architects. The Merchant guild will have to wait until the walls are high enough to protect their gold."
+        },
+        {
+          heading: "Imperial Directive: Phase III (The Council)",
+          content: [
+            "Selection: Secretly choose ONE Citizen Card from your hand and place it face-down.",
+            "Builder: Pay 2 Stone to place a Fortification Token (+1 Defense, +1 Income).",
+            "Merchant: Trade 2 Grain with the bank to gain 1 Gold.",
+            "Explorer: Pay 1 Grain to move to and claim a new tile.",
+            "Warrior: Pay 1 Grain to attack an enemy tile."
+          ]
+        },
+        {
+          heading: "Entry V: Expansion (Action Cycle)",
+          content: "With our walls secure, I deployed the Explorer corps. They pushed into the eastern ruins. It was a dangerous gamble—the ancient structures collapsed upon entry, but we scavenged valuable technology from the debris. We now hold the eastern flank, though our supplies are running low. I had to barter our last gold reserves for emergency grain just to keep the troops moving."
+        },
+        {
+          heading: "Imperial Directive: Phase IV (Action)",
+          content: [
+            "Taking Turns: Starting with the 1st player, take turns performing one action until everyone passes.",
+            "Ruins (Special Case): If you expand into a Ruins tile, you do not claim it. Instead, draw an Event Card immediately, resolve it, and then turn the tile into a standard Plains tile (Grain).",
+            "Emergency Market: At any time during your turn, you may trade 3 of ANY resource to gain 1 Grain. This is vital if you are stuck.",
+            "Maneuver: You may move one of your control markers to an adjacent tile you already control for free."
+          ]
+        },
+        {
+          heading: "Entry VI: Contact (Combat & Challenge)",
+          content: "The Aurelian Dynasty spotted our movement. They claimed a nearby ridge was a \"Goldmine.\" I knew it was a lie—geographically impossible. I shouted my challenge across the valley. They faltered, their deception exposed. We seized the ridge without drawing a sword. Emboldened, I ordered the Warriors to breach their main lines. Their soldiers were strong, but our fortifications held. We drove them back and seized their supply trains in the confusion."
+        },
+        {
+          heading: "Imperial Directive: Combat & Challenges",
+          content: [
+            "The Challenge: If you suspect a lie when a token is placed, shout \"Challenge!\"",
+            "If They Lied: You gain +1 VP, and they lose the tile immediately.",
+            "If They Told Truth: You receive a \"Turn Lost\" Penalty Token and must skip your next turn.",
+            "Combat Roll: Attacker and Defender each roll 1d6.",
+            "Modifiers: Attacker gets +1 (Warrior Bonus). Defender gets +1 if Fortified.",
+            "Victory: High total wins. Defenders win ties.",
+            "Spoils: If Attacker wins, they displace the defender, destroy any fort, and blindly steal 1 Resource from the Defender's box (Pillage)."
+          ]
+        },
+        {
+          heading: "Entry VII: The Twin Suns Return (End Game)",
+          content: "Five Eclipses have passed. The light is returning. The \"Fog of War\" is lifting, and the grand audit has begun. The Aurelian Dynasty claimed to hold vast gold mines to the south, but the light revealed only barren rocks. Their empire crumbled under the weight of their perjury as the auditors stripped them of their lands. We, however, stood tall. Our walls are real. Our gold is real. The throne is ours."
+        },
+        {
+          heading: "Imperial Directive: The Audit (End Game)",
+          content: [
+            "Reveal: At the end of Round 5, flip ALL map tiles face-up.",
+            "Judgment: Compare every Declaration Token to the actual tile art. If they do not match, the owner loses the tile and its VP immediately. Lies crumble in the light.",
+            "Final Scoring: +1 VP per Controlled Tile.",
+            "+1 VP per Fortification.",
+            "+1 VP per 3 Resources held in Treasury.",
+            "Score Secret Directives and Public Imperatives."
           ]
         }
       ]
@@ -239,7 +314,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
   const activeCategory = GUIDE_DATA.find(c => c.id === activeTab);
 
   return (
-    <div className="absolute inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+    <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
       <div className="bg-[#0f172a] border border-[#ca8a04] w-full max-w-5xl h-[85vh] rounded-lg shadow-2xl flex overflow-hidden relative">
         {/* Close Button */}
         <button 
@@ -254,7 +329,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
           <div className="p-4 md:p-6 border-b border-slate-700">
             <h2 className="text-[#fcd34d] font-title text-xl leading-none hidden md:block">Field Manual</h2>
             <h2 className="text-[#fcd34d] font-title text-xl leading-none md:hidden text-center">FM</h2>
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.0-Beta</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest hidden md:block">Ver 2.1-Live</span>
           </div>
           <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
             {GUIDE_DATA.map(category => (
@@ -294,7 +369,6 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                              {section.heading}
                           </h3>
                           
-                          {/* Render Content Text */}
                           {section.content && (
                               <div className="text-slate-300 text-sm leading-relaxed mb-4">
                                   {Array.isArray(section.content) ? (
@@ -312,7 +386,6 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                               </div>
                           )}
 
-                          {/* Render Table Data */}
                           {section.tableData && (
                               <div className="grid gap-2">
                                   {section.tableData.map((row, i) => (
@@ -327,7 +400,6 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                   ))}
               </div>
 
-              {/* Footer Note */}
               <div className="mt-12 text-center text-slate-600 text-[10px] uppercase tracking-widest">
                   Eclipse of Empires II • Strategic Archives
               </div>
