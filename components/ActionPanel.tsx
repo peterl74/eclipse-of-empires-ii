@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Phase, Player, CitizenType, HexData, TileType, Resource } from '../types';
 import { CITIZEN_INFO } from '../constants';
-import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw, Amphora, AlertTriangle } from 'lucide-react';
+import { Scale, Hammer, Sword, Compass, Lock, Play, Sparkles, Check, Eye, RotateCcw, X, SkipForward, Hourglass, User, Crown, RefreshCcw, Amphora } from 'lucide-react';
 
 interface ActionPanelProps {
   phase: Phase;
@@ -15,7 +15,7 @@ interface ActionPanelProps {
   map?: Record<string, HexData>; 
   isActionPhaseDone?: boolean;
   isEliminated?: boolean;
-  isLastStand?: boolean; // NEW: Sunset Rule Indicator
+  isLastStand?: boolean; // Added prop
   uiState: {
     isSelectingTile: boolean;
     isDeclaring: boolean;
@@ -35,7 +35,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
             <h2 className="text-[#fcd34d] font-bold font-title text-sm uppercase tracking-widest w-full text-center relative">
                 {title}
                 {phase === Phase.Action && (
-                    <button onClick={onConfirm} className="absolute right-0 top-0 text-slate-500 hover:text-white p-1">
+                    <button onClick={() => setIsReselecting(false)} className="absolute right-0 top-0 text-slate-500 hover:text-white p-1">
                         <X size={16}/>
                     </button>
                 )}
@@ -138,25 +138,19 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
       }
 
       const role = player.selectedCitizen;
-      const fatigue = player.actionsTaken > 0 ? 1 : 0; // FATIGUE: +1 Cost to ALL actions after the first
       
-      // -- DYNAMIC COST CALCULATIONS --
+      // LOGIC FIX: Re-calculate costs directly to show correct disabled states
+      const fatigue = player.actionsTaken > 0 ? 1 : 0;
+
+      const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= (2 + fatigue);
       
-      // Trade: Base 2 Grain -> 1 Gold. Fatigue: 3 Grain.
-      const tradeCost = 2 + fatigue;
-      const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= tradeCost;
-      
-      // Fortify: Base 2 Stone. Fatigue: 3 Stone.
-      const fortifyCost = 2 + fatigue;
       const isRelicFortifyFree = player.activeRelicPower === 'FREE_FORTIFY' && player.actionsTaken === 0;
-      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= fortifyCost);
+      const canFortify = isRelicFortifyFree || player.status.freeFortify || (player.resources.Stone >= (2 + fatigue));
       
-      // Expand: Base 1 Grain. Fatigue: 2 Grain.
       const expandCost = 1 + fatigue;
       const canExpand = player.resources.Grain >= expandCost;
       
-      // Attack: Base 1 Grain. Fatigue: 2 Grain.
-      const attackCost = 1 + fatigue;
+      const attackCost = (player.actionsTaken === 0 ? 1 : 2) + fatigue;
       const canAttack = player.status.canAttack && player.resources.Grain >= attackCost;
 
       const roleColor = role === CitizenType.Warrior ? '#ef4444' : role === CitizenType.Builder ? '#22c55e' : role === CitizenType.Merchant ? '#eab308' : '#3b82f6';
@@ -176,7 +170,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
       return (
           <div className="w-full bg-[#0f172a] border-t border-[#ca8a04] flex flex-col shadow-[0_-5px_15px_rgba(0,0,0,0.5)] shrink-0">
               
-              {/* TURN INDICATOR HEADER */}
               <div className={`w-full py-2 px-4 flex items-center justify-between text-sm font-bold uppercase tracking-widest border-b transition-colors duration-500 ${isMyTurn ? 'bg-gradient-to-r from-[#ca8a04] to-[#eab308] text-black border-[#fcd34d]' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
                   <div className="flex items-center gap-2">
                       <Hourglass size={14} className={isMyTurn ? "animate-spin" : ""}/>
@@ -184,18 +177,13 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                   </div>
                   <div className="flex items-center gap-2">
                        {isMyTurn ? (
-                           isLastStand ? (
-                               <span className="animate-pulse text-red-600 font-black flex items-center gap-1"><AlertTriangle size={14}/> LAST STAND: FINAL ACTION</span>
-                           ) : (
-                               <span className="animate-pulse">YOUR TURN TO ACT</span>
-                           )
+                           <span className="animate-pulse">{isLastStand ? "LAST STAND!" : "YOUR TURN TO ACT"}</span>
                        ) : (
                            <span>Turn: <span className="text-white">{activePlayerName || "Opponent"}</span></span>
                        )}
                   </div>
               </div>
 
-              {/* RELIC POWER INDICATOR */}
               {powerLabel && (
                   <div className="w-full bg-[#1e293b] border-b border-slate-700 px-4 py-1 flex items-center justify-center gap-2 text-[10px] uppercase font-bold tracking-widest text-emerald-400 shadow-inner">
                       <Crown size={12} className="text-[#ca8a04]" />
@@ -204,7 +192,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
               )}
 
               <div className="p-3">
-                  {/* Council Selection Header */}
                   <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-bold uppercase tracking-widest" style={{color: roleColor}}>Active Council: <span className="text-white">{role}</span></h3>
                       <div className="flex gap-2">
@@ -217,10 +204,12 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                             <RefreshCcw size={12}/>
                             <span>Market</span>
                          </button>
+                         
+                         {/* LOGIC FIX: Enabled Change button even if my turn, so I'm not stuck if I can't pay cost */}
                          <button 
                               onClick={() => setIsReselecting(true)}
                               disabled={!isMyTurn || uiState.isSelectingTile || uiState.isDeclaring || uiState.isProcessing}
-                              title={(uiState.isSelectingTile || uiState.isDeclaring) ? "Finish current action first" : "Change Council"}
+                              title="Change Council Card"
                               className="flex items-center gap-1.5 px-2 py-1 rounded text-xs border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                           >
                               <RotateCcw size={12}/>
@@ -228,7 +217,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                           </button>
                       </div>
                   </div>
-                  {/* MAIN ACTIONS ROW */}
                   <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide justify-center md:justify-start">
                       
                       {role === CitizenType.Merchant && (
@@ -240,7 +228,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Scale size={20} className="text-amber-400 mb-1"/>
                              <span className="text-[10px] font-bold text-amber-100 uppercase">Trade</span>
                              <span className="text-[8px] text-amber-200/60">
-                                 {player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' ? "Free (Relic)" : `${tradeCost} Grain -> 1 Gold`}
+                                 {player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' ? "Free (Relic)" : `2 Grain -> 1 Gold`}
                              </span>
                           </button>
                       )}
@@ -254,7 +242,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                              <Hammer size={20} className="text-green-400 mb-1"/>
                              <span className="text-[10px] font-bold text-green-100 uppercase">Fortify</span>
                              <span className="text-[8px] text-green-200/60">
-                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : `${fortifyCost} Stone`}
+                                 {isRelicFortifyFree || player.status.freeFortify ? "Free (Relic/1st)" : `${2 + fatigue} Stone`}
                              </span>
                           </button>
                       )}
@@ -296,7 +284,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                           </>
                       )}
                       
-                      {/* GENERAL ACTIONS */}
                       {hasHiddenRelic && (
                           <button 
                              onClick={() => onAction('ACTIVATE_RELIC')}
@@ -309,7 +296,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({ phase, player, isMyTurn, acti
                           </button>
                       )}
                       
-                      {/* PASS BUTTON */}
                       <button 
                         onClick={() => onAction('PASS')}
                         disabled={!isMyTurn}
