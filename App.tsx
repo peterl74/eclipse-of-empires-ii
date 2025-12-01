@@ -214,28 +214,6 @@ const getCoordString = (map: Record<string, HexData>, hexId: string) => {
     return `${h.diceCoords.col},${h.diceCoords.row}`;
 };
 
-const checkForElimination = (players: Player[], map: Record<string, HexData>, round: number): { updatedPlayers: Player[], eliminationLogs: LogEntry[] } => {
-    const eliminationLogs: LogEntry[] = [];
-    const updatedPlayers = players.map(p => {
-        if (p.isEliminated) return p;
-        
-        const ownedTileCount = Object.values(map).filter(h => h.ownerId === p.id).length;
-        if (ownedTileCount === 0) {
-            eliminationLogs.push({
-                id: `elim-${p.id}-${Date.now()}`,
-                turn: round,
-                text: `${p.name} has been eliminated from the game!`,
-                type: 'combat',
-                actorId: p.id
-            });
-            return { ...p, isEliminated: true, hasPassed: true };
-        }
-        return p;
-    });
-    return { updatedPlayers, eliminationLogs };
-};
-
-
 interface ResolvingEvent {
   card: EventCard;
   type: 'CHOICE' | 'INFO';
@@ -370,6 +348,206 @@ const App: React.FC = () => {
       return player;
   };
 
+  // --- NEW: Helper Functions for App Logic ---
+
+  const getAiDialogue = (player: Player, type: 'attack' | 'defend' | 'expand' | 'fortify'): string => {
+      const texts = AI_DIALOGUE[type as keyof typeof AI_DIALOGUE] || ["..."];
+      return texts[Math.floor(Math.random() * texts.length)];
+  };
+
+  const advanceTurn = () => {
+      setGameState(prev => {
+          let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
+          let attempts = 0;
+          while ((prev.players[prev.turnOrder[nextIndex]].hasPassed || prev.players[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
+              nextIndex = (nextIndex + 1) % prev.turnOrder.length;
+              attempts++;
+          }
+          
+          return {
+              ...prev,
+              turnOrderIndex: nextIndex,
+              turnTrigger: prev.turnTrigger + 1
+          };
+      });
+  };
+
+  const handlePhaseTransition = () => {
+      setGameState(prev => {
+          let nextPhase = prev.phase;
+          let nextRound = prev.round;
+          let newTurnOrder = [...prev.turnOrder];
+          let nextTurnOrderIndex = 0;
+          let ui = { ...prev.uiState, isSelectingTile: false, actionType: null, selectedHexId: null };
+          let newPlayers = prev.players;
+          
+          // Helper for deck management
+          let nextObjectiveDeck = [...prev.objectiveDeck];
+          let nextPublicObjectives = [...prev.publicObjectives];
+          let logs = [...prev.logs];
+
+          if (prev.phase === Phase.Income) {
+              nextPhase = Phase.CitizenChoice;
+              newPlayers = newPlayers.map(p => ({ ...p, hasActed: false, hasPassed: false, actionsTaken: 0, selectedCitizen: null }));
+              logs.push({ id: `phase-ii-${Date.now()}`, turn: prev.round, text: "Phase II: The Council convenes.", type: 'phase' });
+          } 
+          else if (prev.phase === Phase.CitizenChoice) {
+              nextPhase = Phase.Action;
+              logs.push({ id: `phase-iii-${Date.now()}`, turn: prev.round, text: "Phase III: Action Phase begins.", type: 'phase' });
+          } 
+          else if (prev.phase === Phase.Action) {
+              nextPhase = Phase.Events;
+              logs.push({ id: `phase-iv-${Date.now()}`, turn: prev.round, text: "Phase IV: Event Phase.", type: 'phase' });
+              
+              if (prev.passOrder.length > 0) {
+                 const newOrder: number[] = [];
+                 prev.passOrder.forEach(id => { if(!newOrder.includes(id)) newOrder.push(id); });
+                 prev.players.forEach(p => { if(!newOrder.includes(p.id)) newOrder.push(p.id); });
+                 newTurnOrder = newOrder;
+              }
+          } 
+          else if (prev.phase === Phase.Events) {
+              nextPhase = Phase.Scoring;
+              logs.push({ id: `phase-v-${Date.now()}`, turn: prev.round, text: "Phase V: Scoring.", type: 'phase' });
+          } 
+          else if (prev.phase === Phase.Scoring) {
+              if (prev.round >= TOTAL_ROUNDS) {
+                  nextPhase = Phase.EndGame;
+                  logs.push({ id: `end-${Date.now()}`, turn: prev.round, text: "Game Over. Calculating Final Scores...", type: 'phase' });
+              } else {
+                  nextPhase = Phase.Income;
+                  nextRound += 1;
+                  logs.push({ id: `eclipse-${nextRound}-${Date.now()}`, turn: nextRound, text: `Eclipse ${nextRound} Begins.`, type: 'phase' });
+                  
+                  if (nextRound === 2 || nextRound === 3 || nextRound === 4) {
+                      if (nextObjectiveDeck.length > 0) {
+                           const newObj = nextObjectiveDeck.pop();
+                           if (newObj) {
+                               nextPublicObjectives.push(newObj);
+                               logs.push({ id: `obj-reveal-${Date.now()}`, turn: nextRound, text: `Public Imperative Revealed: ${newObj.name}`, type: 'info' });
+                           }
+                      }
+                  }
+                  
+                  newPlayers = newPlayers.map(p => ({
+                      ...p, 
+                      status: {
+                          canAttack: true, combatBonus: 0, fortificationBlocked: false, incomeMultiplier: 1, freeTrades: 0, passiveIncome: false, freeFortify: false, extraActions: 0, turnLost: false
+                      }
+                  }));
+              }
+          }
+
+          return {
+              ...prev,
+              phase: nextPhase,
+              round: nextRound,
+              turnOrder: newTurnOrder,
+              turnOrderIndex: nextTurnOrderIndex,
+              uiState: ui,
+              players: newPlayers,
+              passOrder: nextPhase === Phase.Action ? [] : prev.passOrder,
+              objectiveDeck: nextObjectiveDeck,
+              publicObjectives: nextPublicObjectives,
+              logs
+          };
+      });
+  };
+
+  const handleHumanAction = (action: string, payload?: any) => {
+      const player = gameState.players[0];
+      const fatigue = player.actionsTaken > 0 ? 1 : 0;
+
+      if (action === 'PASS') {
+          setGameState(prev => {
+              const ps = prev.players.map(p => p.id === 0 ? { ...p, hasPassed: true } : p);
+              const po = [...prev.passOrder];
+              if (!po.includes(0)) po.push(0);
+              const logs = [...prev.logs, { id: Date.now().toString(), turn: prev.round, text: "You passed.", type: 'info', actorId: 0 }];
+              return { ...prev, players: ps, passOrder: po, logs };
+          });
+          setTimeout(() => advanceTurn(), 200);
+      }
+      else if (action === 'OPEN_MARKET') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isMarketOpen: true } }));
+      }
+      else if (action === 'TRADE_MARKET') {
+          const costRes = payload?.cost as Resource;
+          const targetRes = payload?.target as Resource;
+          if (player.resources[costRes] >= 3) {
+              setGameState(prev => {
+                  const ps = prev.players.map(p => {
+                      if (p.id === 0) {
+                          return { 
+                              ...p, 
+                              resources: { ...p.resources, [costRes]: p.resources[costRes] - 3, [targetRes]: p.resources[targetRes] + 1 },
+                          };
+                      }
+                      return p;
+                  });
+                  return { ...prev, players: ps, uiState: { ...prev.uiState, isMarketOpen: false }, logs: [...prev.logs, {id:Date.now().toString(), turn: prev.round, text: `Market: Traded 3 ${costRes} for 1 ${targetRes}.`, type:'info', actorId:0}] };
+              });
+          }
+      }
+      else if (action === 'TRADE_BANK') {
+           const canTrade = player.status.freeTrades > 0 || player.activeRelicPower === 'TRADE_BARON' || player.resources.Grain >= (2 + fatigue);
+           if (canTrade) {
+               setGameState(prev => {
+                   const ps = prev.players.map(p => {
+                       if (p.id === 0) {
+                           let newRes = { ...p.resources };
+                           let newStatus = { ...p.status };
+                           if (p.status.freeTrades > 0) {
+                               newStatus.freeTrades--;
+                           } else if (p.activeRelicPower === 'TRADE_BARON') {
+                               // Relic covers cost
+                           } else {
+                               newRes.Grain -= (2 + fatigue);
+                           }
+                           newRes.Gold += 1;
+                           return { ...p, resources: newRes, status: newStatus, actionsTaken: p.actionsTaken + 1 };
+                       }
+                       return p;
+                   });
+                   return { ...prev, players: ps, logs: [...prev.logs, {id:Date.now().toString(), turn:prev.round, text: "Merchant Trade: 2 Grain -> 1 Gold.", type:'info', actorId:0}] };
+               });
+               setTimeout(() => advanceTurn(), 200);
+           }
+      }
+      else if (action === 'BUILD_FORTIFY') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, actionType: 'FORTIFY', isSelectingTile: true } }));
+      }
+      else if (action === 'WARRIOR_ATTACK') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, actionType: 'ATTACK', isSelectingTile: true } }));
+      }
+      else if (action === 'EXPLORE_CLAIM') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, actionType: 'CLAIM', isSelectingTile: true } }));
+      }
+      else if (action === 'EXPLORE_RUIN') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, actionType: 'EXPLORE', isSelectingTile: true } }));
+      }
+      else if (action === 'ACTIVATE_RELIC') {
+          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, actionType: 'ACTIVATE', isSelectingTile: true } }));
+      }
+  };
+
+  const handleEventResourceChoice = (resource: Resource) => {
+      if (!resolvingEvent) return;
+      
+      setGameState(prev => {
+          const ps = prev.players.map(p => {
+              if (p.id === 0) {
+                  return { ...p, resources: { ...p.resources, [resource]: p.resources[resource] + resolvingEvent.amount! } };
+              }
+              return p;
+          });
+          return { ...prev, players: ps, logs: [...prev.logs, { id: `evt-choice-${Date.now()}`, turn: prev.round, text: `You chose ${resolvingEvent.amount} ${resource}.`, type: 'info' }] };
+      });
+      
+      setResolvingEvent(null);
+      if (resolvingEvent.onComplete) resolvingEvent.onComplete();
+  };
+
   useEffect(() => {
       if (!gameStarted) return;
       
@@ -410,6 +588,15 @@ const App: React.FC = () => {
 
           // If pending challenge exists, do not advance AI.
           if (gameState.pendingChallenge && gameState.pendingChallenge.isActive) return;
+          
+          // Check for Phase End (All Passed)
+          const activePlayersList = gameState.players.filter(p => !p.isEliminated);
+          if (activePlayersList.every(p => p.hasPassed)) {
+               const timer = setTimeout(() => {
+                  handlePhaseTransition();
+               }, 500);
+               return () => clearTimeout(timer);
+          }
 
           // FIXED: If player is passed or eliminated, advance automatically.
           if (activePlayer.hasPassed || activePlayer.isEliminated) {
@@ -425,6 +612,33 @@ const App: React.FC = () => {
               }, 1500); 
               return () => clearTimeout(timer);
           }
+      }
+
+      if (gameState.phase === Phase.Events) {
+          const timer = setTimeout(() => {
+             const { card, newDeck, newDiscard, reshuffled } = drawCard(gameState.eventDeck, gameState.discardPile);
+             
+             const newStateDiff = applyEventToState(gameState, card, false, true); 
+             
+             setGameState(prev => {
+                 let logs = [...prev.logs, ...newStateDiff.logs];
+                 if (reshuffled) logs.push({ id: `shuff-evt-${Date.now()}`, turn: prev.round, text: "Event Deck reshuffled.", type: 'info' });
+                 
+                 return {
+                     ...prev,
+                     players: newStateDiff.players || prev.players,
+                     map: newStateDiff.map || prev.map,
+                     logs,
+                     eventDeck: newDeck,
+                     discardPile: newDiscard
+                 };
+             });
+             
+             setTimeout(() => {
+                 handlePhaseTransition();
+             }, 3500);
+          }, 1000);
+          return () => clearTimeout(timer);
       }
   }, [gameState.phase, gameState.turnTrigger, gameStarted, gameState.pendingChallenge?.isActive]);
 
@@ -974,495 +1188,6 @@ const App: React.FC = () => {
       });
   };
 
-  const getAiDialogue = (ai: Player, type: keyof typeof AI_DIALOGUE) => {
-       const lines = AI_DIALOGUE[type];
-       return lines[Math.floor(Math.random() * lines.length)];
-  };
-
-  const advanceTurn = () => {
-    setGameState(prev => {
-        const activePlayerId = prev.turnOrder[prev.turnOrderIndex];
-        const currentPlayer = prev.players[activePlayerId];
-
-        if (currentPlayer && currentPlayer.status.extraActions > 0 && !currentPlayer.hasPassed && !currentPlayer.isEliminated) {
-            const ps = prev.players.map(p => p.id === currentPlayer.id ? { 
-                ...p, 
-                status: { ...p.status, extraActions: p.status.extraActions - 1 } 
-            } : p);
-            return { ...prev, players: ps, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
-        }
-
-        const activePlayers = prev.players.filter(p => !p.isEliminated);
-        const allPassed = activePlayers.every(p => p.hasPassed); 
-        
-        if (allPassed) {
-             return { 
-                 ...prev, 
-                 logs: [...prev.logs, { id: 'end-phase', turn: prev.round, text: "All players passed. Events Phase beginning.", type: 'phase' }],
-                 turnTrigger: prev.turnTrigger + 1,
-                 uiState: { ...prev.uiState, isProcessing: false }
-             };
-        }
-
-        let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
-        let loop = 0;
-        
-        while(loop < prev.players.length) {
-             const playerToPlay = prev.players[prev.turnOrder[nextIndex]];
-             
-             if (playerToPlay.isEliminated || playerToPlay.hasPassed) {
-                 nextIndex = (nextIndex + 1) % prev.turnOrder.length;
-                 loop++;
-             } else if (playerToPlay.status.turnLost) {
-                 const ps = prev.players.map(p => p.id === playerToPlay.id ? { ...p, status: { ...p.status, turnLost: false }, hasPassed: true } : p);
-                 const logs = [...prev.logs, { id: Date.now().toString(), turn: prev.round, text: `${playerToPlay.name} serves Penalty: Turn Lost.`, type: 'alert' as const }];
-                 return { ...prev, players: ps, logs, turnOrderIndex: (nextIndex + 1) % prev.turnOrder.length, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
-             } else {
-                 break;
-             }
-        }
-
-        // --- SUNSET RULE: LAST STAND ---
-        const nextPlayerId = prev.turnOrder[nextIndex];
-        const currentId = prev.turnOrder[prev.turnOrderIndex];
-        
-        if (activePlayers.length > 1 && nextPlayerId === currentId && !prev.players[currentId].hasPassed) {
-             const ps = prev.players.map(p => p.id === currentId ? { ...p, hasPassed: true } : p);
-             const logs = [...prev.logs, { id: `sunset-${Date.now()}`, turn: prev.round, text: "Sunset Rule: All rivals passed. Round ends.", type: 'phase' as const }];
-             return { 
-                 ...prev, 
-                 players: ps, 
-                 logs, 
-                 turnTrigger: prev.turnTrigger + 1, 
-                 uiState: { ...prev.uiState, isProcessing: false } 
-             };
-        }
-
-        return { ...prev, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false } };
-    });
-  };
-
-  useEffect(() => {
-      if (gameState.phase === Phase.Action) {
-           const activePlayers = gameState.players.filter(p => !p.isEliminated);
-           if (activePlayers.length > 0 && activePlayers.every(p => p.hasPassed)) {
-               setTimeout(() => handlePhaseTransition(), 500);
-           }
-      }
-  }, [gameState.turnTrigger, gameState.phase]);
-
-
-  const advanceFromEventsPhase = () => {
-    handlePhaseTransition();
-  };
-
-  const handlePhaseTransition = () => {
-      setGameState(prev => {
-          if (prev.phase === Phase.CitizenChoice && !prev.players[0].selectedCitizen) {
-               return prev; 
-          }
-          
-          const nextPhaseMap: Record<Phase, Phase> = {
-              [Phase.Income]: Phase.CitizenChoice,
-              [Phase.CitizenChoice]: Phase.Action,
-              [Phase.Action]: Phase.Events,
-              [Phase.Events]: Phase.Scoring,
-              [Phase.Scoring]: prev.round === TOTAL_ROUNDS ? Phase.EndGame : Phase.Income,
-              [Phase.EndGame]: Phase.EndGame
-          };
-          
-          const nextP = nextPhaseMap[prev.phase];
-          if (prev.phase === Phase.Action && nextP !== Phase.Events) return prev; 
-          
-          if (prev.phase === Phase.Events) {
-              const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
-              return { ...prev, phase: Phase.Scoring, players: playersAfterElimination, logs: [...prev.logs, ...eliminationLogs] };
-          }
-
-          let nextRound = prev.round;
-          let newActiveEvent = null;
-          let partialUpdate: any = { players: prev.players, map: prev.map, passOrder: prev.passOrder };
-          let nextTurnOrderIndex = 0;
-          let nextTurnOrder = prev.turnOrder;
-          let currentEventDeck = prev.eventDeck;
-          let currentDiscardPile = prev.discardPile;
-          let currentObjectiveDeck = prev.objectiveDeck;
-          let newPublicObjectives = [...prev.publicObjectives];
-          let logs = [...prev.logs];
-          
-          if (nextP === Phase.Income) {
-              nextRound++;
-              const validIndex = nextTurnOrder.findIndex(pid => !prev.players[pid].isEliminated);
-              nextTurnOrderIndex = validIndex !== -1 ? validIndex : 0;
-          }
-          
-          if (nextP === Phase.Action) {
-            const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
-            logs.push(...eliminationLogs);
-            partialUpdate.players = playersAfterElimination;
-
-            const activePlayers = playersAfterElimination.filter(p => !p.isEliminated);
-            
-            if (activePlayers.length > 0) {
-                if (nextRound > 1 && prev.passOrder.length > 0) {
-                    const validPassOrder = prev.passOrder.filter(id => !playersAfterElimination[id].isEliminated);
-                    const missing = activePlayers.map(p => p.id).filter(id => !validPassOrder.includes(id)).sort((a,b) => a - b);
-                    nextTurnOrder = [...validPassOrder, ...missing];
-                    
-                    logs.push({ 
-                        id: `order-${nextRound}`, 
-                        turn: nextRound, 
-                        text: `Turn Order determined by passing: ${nextTurnOrder.map(id => playersAfterElimination[id].name).join(" → ")}`, 
-                        type: 'info' 
-                    });
-                } else {
-                    const activePlayerIds = activePlayers.map(p => p.id).sort((a, b) => a - b);
-                    const shift = (nextRound - 1) % activePlayers.length;
-                    nextTurnOrder = [...activePlayerIds.slice(shift), ...activePlayerIds.slice(0, shift)];
-                    
-                    const firstPlayerName = playersAfterElimination.find(p => p.id === nextTurnOrder[0])?.name || "Unknown";
-                    logs.push({ 
-                        id: `init-${nextRound}`, 
-                        turn: nextRound, 
-                        text: `Turn Order updated. ${firstPlayerName} goes first.`, 
-                        type: 'info' 
-                    });
-                }
-                nextTurnOrderIndex = 0;
-            } else {
-                nextTurnOrder = [];
-                nextTurnOrderIndex = 0;
-            }
-            partialUpdate.passOrder = [];
-          }
-
-          if (nextP === Phase.Events) {
-            const { updatedPlayers: playersAfterElimination, eliminationLogs } = checkForElimination(prev.players, prev.map, prev.round);
-            logs.push(...eliminationLogs);
-            partialUpdate.players = playersAfterElimination;
-
-            const drawResult = drawCard(currentEventDeck, currentDiscardPile);
-            const card = drawResult.card;
-            currentEventDeck = drawResult.newDeck;
-            currentDiscardPile = drawResult.newDiscard;
-            
-            if (drawResult.reshuffled) {
-                logs.push({ id: `shuffle-${Date.now()}`, turn: nextRound, text: "Event Deck empty. Discard pile reshuffled.", type: 'info' });
-            }
-            
-            const result = applyEventToState({ ...prev, players: playersAfterElimination, logs }, card, false, true);
-            
-            partialUpdate.players = result.players || playersAfterElimination;
-            partialUpdate.map = result.map || prev.map;
-            logs.push(...(result.logs || []));
-            newActiveEvent = { card, isRelicPowered: false };
-
-            const humanNeedsChoice = card.id === 'e1' && !playersAfterElimination[0].isEliminated;
-
-            if (humanNeedsChoice) {
-                setResolvingEvent({
-                    card,
-                    type: 'CHOICE',
-                    amount: card.normalEffect.value,
-                    isRelicPowered: false,
-                    onComplete: () => setTimeout(advanceFromEventsPhase, 1000)
-                });
-            } else {
-                setTimeout(advanceFromEventsPhase, 3500);
-            }
-          }
-
-          let newPlayers = partialUpdate.players.map((p: Player) => {
-              const currentScore = calculateScore(p, partialUpdate.map, newPublicObjectives);
-              return {
-                  ...p,
-                  vp: currentScore.total,
-                  hasActed: false,
-                  hasPassed: p.isEliminated ? true : false,
-                  actionsTaken: 0,
-                  selectedCitizen: nextP === Phase.CitizenChoice ? null : p.selectedCitizen,
-                  status: {
-                      ...p.status,
-                      canAttack: true,
-                      combatBonus: 0,
-                      fortificationBlocked: false,
-                      freeTrades: 0,
-                      freeFortify: false,
-                      extraActions: 0,
-                      turnLost: false 
-                  }
-              }
-          });
-          
-          if (nextP === Phase.Income || (prev.phase === Phase.Scoring && nextP !== Phase.EndGame)) {
-               logs.push({ id: `round-${nextRound}`, turn: nextRound, text: `Eclipse ${nextRound}`, type: 'phase' });
-
-               if (nextRound >= 2 && nextRound <= 4) {
-                   const obj = currentObjectiveDeck.pop();
-                   if (obj) {
-                       newPublicObjectives.push(obj);
-                       logs.push({ id: `pub-obj-${nextRound}`, turn: nextRound, text: `Public Imperative Revealed: ${obj.name}`, type: 'phase' });
-                   }
-               }
-
-               newPlayers = newPlayers.map((p: Player) => {
-                   if (p.isEliminated) return p;
-
-                   if (p.activeRelicPower === 'TRADE_BARON') {
-                       p.status.freeTrades = 1;
-                   }
-
-                   const rates = getIncomeRate(p, partialUpdate.map, false);
-                   p.resources[Resource.Grain] += rates[Resource.Grain];
-                   p.resources[Resource.Stone] += rates[Resource.Stone];
-                   p.resources[Resource.Gold] += rates[Resource.Gold];
-                   p.resources[Resource.Relic] += rates[Resource.Relic];
-
-                   if (!p.isHuman) {
-                       const wild = [Resource.Grain, Resource.Stone, Resource.Gold][Math.floor(Math.random()*3)];
-                       p.resources[wild]++;
-                   }
-
-                   return updateMaxResources(p);
-               });
-          }
-
-          if (nextP === Phase.Action) {
-              logs.push({ id: 'reveal', turn: prev.round, text: "Council Session - Citizens Revealed", type: 'phase' });
-              newPlayers.forEach((p: Player) => {
-                 if(!p.isHuman && !p.isEliminated) logs.push({id:`rev-${p.id}`, turn:prev.round, text:`${p.name} is a ${p.selectedCitizen}`, type:'info', actorId: p.id});
-              });
-          }
-
-          return { 
-              ...prev, 
-              phase: nextP, 
-              round: nextRound, 
-              logs, 
-              players: newPlayers, 
-              map: partialUpdate.map,
-              turnOrder: nextTurnOrder,
-              turnOrderIndex: nextTurnOrderIndex,
-              turnTrigger: prev.turnTrigger + 1,
-              activeEvent: newActiveEvent,
-              eventDeck: currentEventDeck,
-              discardPile: currentDiscardPile, 
-              objectiveDeck: currentObjectiveDeck,
-              publicObjectives: newPublicObjectives,
-              uiState: { ...prev.uiState, isProcessing: false },
-              passOrder: partialUpdate.passOrder !== undefined ? partialUpdate.passOrder : prev.passOrder
-          };
-      });
-  };
-
-  const handleEventResourceChoice = (res: Resource) => {
-      if (!resolvingEvent || !resolvingEvent.amount) return;
-      
-      setGameState(prev => {
-          const ps: Player[] = prev.players.map(p => ({...p, resources: {...p.resources}}));
-          ps[0].resources[res]++;
-          const updatedP0 = updateMaxResources(ps[0]);
-          ps[0] = updatedP0;
-
-          const remaining = (resolvingEvent.amount || 1) - 1;
-          const newLog: LogEntry = { id: `choice-${Date.now()}`, turn: prev.round, text: `You chose 1 ${res} from Event.`, type: 'info' };
-          const logs = [...prev.logs, newLog];
-
-          if (remaining > 0) {
-              setResolvingEvent({ ...resolvingEvent, amount: remaining });
-          } else {
-              setResolvingEvent(null);
-              if (resolvingEvent.onComplete) resolvingEvent.onComplete();
-          }
-          
-          return { ...prev, players: ps, logs };
-      });
-  };
-
-  const handleCloseMarket = () => {
-      setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isMarketOpen: false } }));
-  }
-
-  const handleSelectCitizen = (type: CitizenType) => {
-      setGameState(prev => {
-          const newPlayers = prev.players.map(p => p.id === 0 ? { ...p, selectedCitizen: type } : p);
-          return { 
-              ...prev, 
-              players: newPlayers,
-              uiState: { ...prev.uiState, isSelectingTile: false, actionType: null, selectedHexId: null, isDeclaring: false, pendingHexId: null }
-          };
-      });
-  };
-
-  const handleHumanAction = (action: string, payload?: any) => {
-      if (gameState.uiState.isProcessing) return; 
-
-      const p = gameState.players[0];
-      if (p.isEliminated) return;
-      
-      if (action === 'PASS') {
-           setGameState(prev => {
-               const newPlayers = prev.players.map(pl => pl.id === 0 ? { ...pl, hasPassed: true } : pl);
-               const activePlayers = newPlayers.filter(p => !p.isEliminated);
-               const allPassed = activePlayers.every(p => p.hasPassed);
-               
-               const newPassOrder = [...prev.passOrder];
-               if (!newPassOrder.includes(0)) newPassOrder.push(0);
-
-               if (allPassed) {
-                   return {
-                       ...prev, players: newPlayers,
-                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass. All players passed. Events Phase beginning.", type:'phase', actorId: 0}],
-                       turnTrigger: prev.turnTrigger + 1, uiState: { ...prev.uiState, isProcessing: false }, passOrder: newPassOrder
-                   };
-               } else {
-                   // Manual advance logic for pass since advanceTurn handles active players
-                   let nextIndex = (prev.turnOrderIndex + 1) % prev.turnOrder.length;
-                   let attempts = 0;
-                   while ((newPlayers[prev.turnOrder[nextIndex]].hasPassed || newPlayers[prev.turnOrder[nextIndex]].isEliminated) && attempts < prev.turnOrder.length) {
-                       nextIndex = (nextIndex + 1) % prev.turnOrder.length;
-                       attempts++;
-                   }
-                   return { 
-                       ...prev, players: newPlayers, turnOrderIndex: nextIndex, turnTrigger: prev.turnTrigger + 1,
-                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: "You pass for this Eclipse.", type:'info', actorId: 0}],
-                       uiState: { ...prev.uiState, isProcessing: false }, passOrder: newPassOrder
-                   };
-               }
-           });
-           return;
-      }
-      
-      // FATIGUE CALCULATION: +1 Cost per action taken this round
-      const fatigue = p.actionsTaken > 0 ? 1 : 0;
-
-      if (action === 'TRADE_BANK') {
-          const isFree = p.status.freeTrades > 0 || p.activeRelicPower === 'TRADE_BARON'; 
-          const tradeCost = 2 + fatigue; // Base 2 + Fatigue
-
-          if (isFree || p.resources[Resource.Grain] >= tradeCost) {
-               setGameState(prev => {
-                   const currentP = prev.players[0];
-                   let newRes = { ...currentP.resources };
-                   let newStatus = { ...currentP.status };
-                   const usedFree = currentP.status.freeTrades > 0;
-
-                   if (usedFree) { newStatus.freeTrades--; } 
-                   else { newRes[Resource.Grain] -= tradeCost; }
-                   
-                   newRes[Resource.Gold] += 1;
-                   
-                   const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, resources: newRes, status: newStatus, actionsTaken: pl.actionsTaken + 1 } : pl);
-                   const txt = usedFree ? "Used Free Trade: +1 Gold." : `Traded ${tradeCost} Grain for 1 Gold.`;
-
-                   return { ...prev, players: ps, logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: txt, type:'info', actorId: 0}] };
-               });
-               advanceTurn();
-          } else addLog(`Need ${tradeCost} Grain.`, 'info');
-          return;
-      }
-
-      if (action === 'OPEN_MARKET') {
-          setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isMarketOpen: true } }));
-          return;
-      }
-
-      if (action === 'TRADE_MARKET') {
-          const costRes = payload?.cost;
-          const targetRes = payload?.target;
-          
-          if (costRes && targetRes && p.resources[costRes] >= 3) {
-              setGameState(prev => {
-                   const currentP = prev.players[0];
-                   let newRes = { ...currentP.resources };
-                   newRes[costRes] -= 3;
-                   newRes[targetRes] += 1; 
-                   
-                   const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, resources: newRes, actionsTaken: pl.actionsTaken + 1 } : pl);
-                   return { 
-                       ...prev, players: ps, 
-                       logs: [...prev.logs, {id: Date.now().toString(), turn:prev.round, text: `Emergency Market: 3 ${costRes} -> 1 ${targetRes}.`, type:'info', actorId: 0}],
-                       uiState: { ...prev.uiState, isMarketOpen: false }
-                   };
-              });
-              advanceTurn();
-          } else {
-              addLog("Trade failed. Insufficient resources.", 'info');
-              handleCloseMarket();
-          }
-          return;
-      }
-
-      if (action === 'EXPLORE_RUIN') {
-          const myRuins = (Object.values(gameState.map) as HexData[]).filter((h) => h.ownerId === 0 && h.type === TileType.Ruins);
-          if (myRuins.length > 0) {
-               const targetRuin = myRuins[0];
-               const hasRelic = (Object.values(gameState.map) as HexData[]).some(h => h.ownerId === 0 && h.type === TileType.RelicSite && h.isRevealed);
-               const { card: evt, newDeck, newDiscard, reshuffled } = drawCard(gameState.eventDeck, gameState.discardPile);
-
-               setGameState(prev => {
-                    const ps = prev.players.map(pl => pl.id === 0 ? { ...pl, actionsTaken: pl.actionsTaken + 1 } : pl);
-                    const nm = { ...prev.map };
-                    if (nm[targetRuin.id]) { nm[targetRuin.id] = { ...nm[targetRuin.id], type: TileType.Plains, publicType: TileType.Plains, isRevealed: true }; }
-                    
-                    const logs = [...prev.logs, { 
-                        id: `ruin-collapse-${Date.now()}`, 
-                        turn: prev.round, 
-                        text: `The Ruins at [${getCoordString(nm, targetRuin.id)}] collapse after your search. Found: ${evt.title}`, 
-                        type: 'event' as const, 
-                        details: { card: evt.title } 
-                    }];
-                    if (reshuffled) logs.push({ id: `shuffle-${Date.now()}`, turn: prev.round, text: "Event Deck empty. Discard pile reshuffled.", type: 'info' });
-
-                    return { ...prev, players: ps, map: nm, logs, eventDeck: newDeck, discardPile: newDiscard };
-               });
-
-               setResolvingEvent({
-                   card: evt,
-                   type: evt.id === 'e1' ? 'CHOICE' : 'INFO',
-                   amount: hasRelic ? 4 : 2,
-                   isRelicPowered: hasRelic,
-                   onComplete: () => setTimeout(() => advanceTurn(), 100)
-               });
-          } else addLog("You do not control any Ruins.", 'info');
-          return;
-      }
-
-      let valid = false;
-      
-      if (action === 'BUILD_FORTIFY') {
-          const isRelicFree = p.activeRelicPower === 'FREE_FORTIFY' && p.actionsTaken === 0;
-          const isFree = p.status.freeFortify || isRelicFree;
-          const fortifyCost = 2 + fatigue; 
-
-          if (isFree) { valid = true; } 
-          else { valid = p.resources[Resource.Stone] >= fortifyCost; if (!valid) addLog(`Need ${fortifyCost} Stone.`, 'info'); }
-      }
-      else if (action === 'WARRIOR_ATTACK') {
-          const attackCost = 1 + fatigue;
-          if (p.status.canAttack) { valid = p.resources[Resource.Grain] >= attackCost; if (!valid) addLog(`Commander, we need ${attackCost} Grain to supply the troops!`, 'info'); }
-      }
-      else if (action === 'EXPLORE_CLAIM') {
-          const cost = 1 + fatigue; 
-          valid = p.resources[Resource.Grain] >= cost;
-          if (!valid) addLog(`Exploration costs ${cost} Grain (Fatigue +1).`, 'info');
-      }
-      else if (action === 'ACTIVATE_RELIC') valid = true;
-
-      if (valid) {
-          setGameState(prev => ({ 
-              ...prev, 
-              uiState: { 
-                  ...prev.uiState, isSelectingTile: true, 
-                  actionType: action === 'ACTIVATE_RELIC' ? 'ACTIVATE' : (action === 'WARRIOR_ATTACK' ? 'ATTACK' : action.split('_')[1]) as any, 
-                  selectedHexId: null, isDeclaring: false, pendingHexId: null
-              } 
-          }));
-          const msg = action === 'ACTIVATE_RELIC' ? "Select a hidden Relic to unveil." : "Select a target tile.";
-          addLog(msg, 'info');
-      }
-  };
-
   const handleCancelDeclaration = () => {
     setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isDeclaring: false, pendingHexId: null, isSelectingTile: true } }));
   };
@@ -1504,7 +1229,7 @@ const App: React.FC = () => {
       }
 
       if ((actionType === 'CLAIM' || actionType === 'EXPLORE') && hex.ownerId === null && isAdj) {
-           // RUINS CHECK
+           // SPECIAL CASE: RUINS SCAVENGE ON ENTRY
            if (hex.type === TileType.Ruins) {
                const cost = 1 + fatigue;
                if (gameState.players[0].resources.Grain < cost) {
@@ -1512,6 +1237,7 @@ const App: React.FC = () => {
                    return;
                }
 
+               // 1. LOCK INPUT
                setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isProcessing: true } }));
                
                const { card: evt, newDeck, newDiscard, reshuffled } = drawCard(gameState.eventDeck, gameState.discardPile);
@@ -1519,7 +1245,8 @@ const App: React.FC = () => {
                setGameState(prev => {
                    const ps = prev.players.map(p => p.id === 0 ? { ...p, resources: { ...p.resources, Grain: p.resources.Grain - cost }, actionsTaken: p.actionsTaken + 1 } : p);
                    const nm = { ...prev.map };
-                   // Ruin collapses to Plains immediately
+                   
+                   // 2. FORCE TRANSFORM TILE immediately to Plains
                    nm[hexId] = { ...nm[hexId], type: TileType.Plains, publicType: TileType.Plains, isRevealed: true };
                    
                    const logs = [...prev.logs, { 
@@ -1535,10 +1262,12 @@ const App: React.FC = () => {
                    return { 
                        ...prev, players: ps, map: nm, logs, 
                        eventDeck: newDeck, discardPile: newDiscard,
+                       // 3. CRITICAL: Clear actionType here so UI resets
                        uiState: { ...prev.uiState, isSelectingTile: false, actionType: null, selectedHexId: null, isProcessing: true } 
                    };
                });
 
+               // 4. Trigger Event Modal
                setResolvingEvent({ 
                    card: evt, 
                    type: evt.id === 'e1' ? 'CHOICE' : 'INFO', 
@@ -2229,7 +1958,7 @@ const App: React.FC = () => {
           isOpen={gameState.uiState.isDeclaring}
           trueType={gameState.uiState.pendingHexId ? gameState.map[gameState.uiState.pendingHexId].type : TileType.Plains}
           onConfirm={handleDeclarationFixed}
-          onCancel={() => setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isDeclaring: false, pendingHexId: null } }))}
+          onCancel={() => setGameState(prev => ({ ...prev, uiState: { ...prev.uiState, isDeclaring: false, pendingHexId: null, isSelectingTile: true } }))}
       />
       
       {showSim && <SimulationOverlay onClose={() => setShowSim(false)} />}
