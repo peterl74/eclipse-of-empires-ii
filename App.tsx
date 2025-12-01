@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameState, Phase, Player, Resource, LogEntry, TileType, HexData, CitizenType, EventCard, SecretObjective, RelicPowerType, AiState, PendingChallenge, TraitType } from './types';
 import { generateMap, getHexId, getNeighbors, isAdjacent } from './utils/hexUtils';
@@ -412,7 +411,15 @@ const App: React.FC = () => {
           // If pending challenge exists, do not advance AI.
           if (gameState.pendingChallenge && gameState.pendingChallenge.isActive) return;
 
-          if (!activePlayer.isHuman && !activePlayer.hasPassed && !activePlayer.isEliminated) {
+          // FIXED: If player is passed or eliminated, advance automatically.
+          if (activePlayer.hasPassed || activePlayer.isEliminated) {
+              const timer = setTimeout(() => {
+                  advanceTurn();
+              }, 500); 
+              return () => clearTimeout(timer);
+          }
+
+          if (!activePlayer.isHuman) {
               const timer = setTimeout(() => {
                   executeAiAction(activeId);
               }, 1500); 
@@ -1016,11 +1023,6 @@ const App: React.FC = () => {
         }
 
         // --- SUNSET RULE: LAST STAND ---
-        // If the next player found is the SAME as the current player (meaning everyone else passed)
-        // AND there are multiple active players in the game...
-        // ... then this player has just finished their "Last Stand" turn (or is about to take it if logic differs).
-        // Since advanceTurn is called AFTER an action, if we loop back to the same player, it means they just acted while everyone else was passed.
-        // We force them to pass now to prevent infinite turns.
         const nextPlayerId = prev.turnOrder[nextIndex];
         const currentId = prev.turnOrder[prev.turnOrderIndex];
         
